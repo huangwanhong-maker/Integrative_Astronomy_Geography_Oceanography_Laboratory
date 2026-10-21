@@ -86,7 +86,7 @@ export const DOMAINS = {
 };
 
 // Models in the order they are offered.
-const MODEL_ORDER = ['GFS', 'AIGFS', 'AIGEFS mean', 'Barotropic (laboratory)'];
+const MODEL_ORDER = ['GFS', 'AIGFS', 'AIGEFS mean', 'Shallow water (laboratory)', 'Barotropic (laboratory)'];
 export const modelRank = (m) => { const i = MODEL_ORDER.indexOf(m); return i < 0 ? MODEL_ORDER.length : i; };
 
 const isDirection = (v) => /direction/.test(v.standard_name || '') || v.units === 'degree';

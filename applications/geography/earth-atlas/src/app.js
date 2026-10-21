@@ -16,7 +16,7 @@ import { FlowLayer } from './layers/flow.js';
 import { LinesLayer } from './layers/lines.js';
 import { EventsLayer } from './layers/events.js';
 import { ImageryLayer, DetailLayer } from './layers/imagery.js';
-import { LabModel, modelInputs, LAB_MODEL } from './layers/labmodel.js';
+import { LabModel, modelInputs, LAB_MODELS } from './layers/labmodel.js';
 import { setClouds } from './render/surface.js';
 import { Timeline, formatUTC, formatShortUTC, formatDay, formatOffset } from './ui/timeline.js';
 import { renderLegend } from './ui/legend.js';
@@ -47,7 +47,7 @@ const state = {
 
 let library, catalogue, stage, base, surface, flow, lines, events, labels, timeline, geography, elevation;
 let imagery, detail, labModel, detailSource = null;
-const lab = { input: null, running: false, progress: 0, verification: null, against: '', error: '' };
+const lab = { input: null, running: null, progress: 0, runs: {}, start: null, against: '', error: '' };
 const MODEL_COLOURS = ['#CA8DBE', '#f6c47e', '#9fb6e8', '#8fd1b4', '#e8a0a0'];
 const loaded = new Map();          // field products in memory, by name
 const classMaps = new Map();       // class products in memory, by name
@@ -266,7 +266,7 @@ function renderPanel() {
   buildPanel($('layers'), catalogue, state, years, extra, {
     surface: (id) => selectSurface(id),
     compare: (id) => selectCompare(id),
-    runLab: () => runLab(),
+    runLab: (kind) => runLab(kind),
     flow: (id) => selectFlow(id),
     lines: (id) => selectLines(id),
     events: (id) => selectEvents(id),
@@ -794,7 +794,7 @@ function renderAbout() {
     series.add(m.series);
     add(`${m.title.split(',')[0]}, ${[...library.classMeta.values()].filter((x) => x.series === m.series && !x.computed).length} maps`, m.source);
   }
-  if (lab.input) rows.push(`<dt>Laboratory model</dt><dd>The barotropic vorticity equation at 500 hPa, as in the first numerical forecast (Charney, Fjørtoft and von Neumann 1950), solved by the spectral transform method at triangular truncation T42 (a Gaussian grid of 128 × 64) with fourth-order Runge–Kutta steps of 30 min. It starts from the 500 hPa wind of the GFS; heights follow from the stream function by linear balance and are added, as changes, to the analysed height. Tested against the Rossby–Haurwitz wave, an exact solution.</dd>`);
+  if (lab.input) rows.push(`<dt>Laboratory models</dt><dd>Two models of the flow at 500 hPa, solved by the spectral transform method at triangular truncation T42 (a Gaussian grid of 128 × 64) with fourth-order Runge–Kutta steps. The barotropic vorticity equation, as in the first numerical forecast (Charney, Fjørtoft and von Neumann 1950), starts from the wind of the GFS, in steps of 30 min; heights follow by linear balance and are added, as changes, to the analysed height. The shallow-water equations start from its wind and height, in steps of 15 min, after a digital filter over six hours removes the gravity waves of an unbalanced start (Lynch and Huang 1992); their finite radius of deformation slows the longest waves, which the barotropic model moves westward too fast. Tested against the Rossby–Haurwitz wave, Williamson et al.'s steady flow across the poles, and gravity waves of known period.</dd>`);
   if (catalogue.normals.length) rows.push(`<dt>Climate</dt><dd>Climate classes follow Köppen (1936) as revised by Peel et al. (2007) and Beck et al. (2018): the arid group first, then the tropical, polar, temperate and cold groups, with summer the warmer half-year. Besides the published maps, the atlas classifies the ${esc(catalogue.normals[0].model)} normals itself, with the mean temperature of a month taken as the mean of its daily maximum and minimum; the two agree in about nine land cells in ten. Climate diagrams follow Walter and Lieth (1960): 10 °C to 20 mm, dry where precipitation falls below twice the temperature (Gaussen).</dd>`);
   rows.push(`<dt>Method</dt><dd>Fields are interpolated bilinearly in space and linearly in time between the stored steps; a place near missing values takes the mean of the valid neighbours carrying at least half the weight. Wind direction is the direction it comes from. Wave energy travels at the deep-water group speed g T / 4π along the peak direction. The Sun's position follows the Astronomical Almanac's low-precision formulas (0.01°); day, civil, nautical and astronomical twilight are drawn as bands. Countries are joined to indicators by their World Bank and ISO codes; boundaries are Natural Earth's de facto depiction. The Equal Earth projection keeps areas true.</dd>`);
   $('about-body').innerHTML = `<dl>${rows.join('')}</dl>`;
@@ -803,12 +803,13 @@ function renderAbout() {
 // ---- the laboratory's model ---------------------------------------------------------
 
 let labPanelTimer = 0;
-async function runLab() {
+async function runLab(kind = 'barotropic') {
   if (lab.running) return;
-  lab.running = true; lab.progress = 0; lab.error = '';
+  lab.running = kind; lab.progress = 0; lab.error = '';
   renderPanel();
   try {
     const result = await labModel.run(state.time, {
+      model: kind,
       onProgress: (f) => {
         lab.progress = f;
         clearTimeout(labPanelTimer);
@@ -821,14 +822,18 @@ async function runLab() {
     loaded.set(meta.name, result.product);
     surface.textures.forget(meta.name);
     catalogue = buildCatalogue(library);
-    lab.verification = result.verification;
+    // Runs from another start are not comparable: they are forgotten.
+    if (lab.start !== result.start) lab.runs = {};
+    lab.runs[kind] = result.verification;
+    lab.start = result.start;
     lab.against = result.against;
     state.live = false;
     state.time = result.start;
-    const height = catalogue.surfaces.find((d) => d.key === 'height|500 hPa|' && d.model === LAB_MODEL);
-    const contours = catalogue.lines.find((d) => d.key === 'heights|500 hPa' && d.model === LAB_MODEL);
-    const wind = catalogue.flows.find((d) => d.key === 'wind|500 hPa' && d.model === LAB_MODEL);
-    lab.running = false;
+    const label = LAB_MODELS[kind].label;
+    const height = catalogue.surfaces.find((d) => d.key === 'height|500 hPa|' && d.model === label);
+    const contours = catalogue.lines.find((d) => d.key === 'heights|500 hPa' && d.model === label);
+    const wind = catalogue.flows.find((d) => d.key === 'wind|500 hPa' && d.model === label);
+    lab.running = null;
     await Promise.all([
       height ? selectSurface(height.id, false) : null,
       contours ? selectLines(contours.id, false) : null,
@@ -840,7 +845,7 @@ async function runLab() {
     console.error(e);
     lab.error = `The model could not run: ${e.message}`;
   }
-  lab.running = false;
+  lab.running = null;
   renderPanel();
   updateTimeline();
   remember();

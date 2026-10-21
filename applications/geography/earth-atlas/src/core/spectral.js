@@ -13,8 +13,9 @@
 // over mu in [-1, 1] is 1. Coefficients are stored as Float64Arrays of real and
 // imaginary parts, indexed by index(m, n).
 //
-// Analysis integrates over longitude by a discrete Fourier transform and over
-// latitude by Gaussian quadrature, which is exact for the products of a
+// Analysis integrates over longitude by a discrete Fourier transform (by the
+// radix-2 fast Fourier transform when the number of longitudes is a power of
+// two, as on the grids used here) and over latitude by Gaussian quadrature, which is exact for the products of a
 // quadratic grid (nlat >= (3M + 1) / 2, nlon >= 3M + 1), so the transforms of
 // products of two fields carry no aliasing.
 //
@@ -50,6 +51,45 @@ export function gaussLegendre(n) {
   return { mu, w };
 }
 
+// The discrete Fourier transform of n points (n a power of two), in place:
+// X_m = sum_k x_k e^{sign i 2 pi m k / n}, by the iterative radix-2 algorithm
+// (Cooley and Tukey 1965; Press et al. 2007, sec. 12.2).
+export class FFT {
+  constructor(n) {
+    this.n = n;
+    this.rev = new Uint32Array(n);
+    const bits = Math.log2(n);
+    for (let i = 0; i < n; i++) {
+      let r = 0;
+      for (let b = 0; b < bits; b++) r |= ((i >> b) & 1) << (bits - 1 - b);
+      this.rev[i] = r;
+    }
+    this.cos = new Float64Array(n / 2);
+    this.sin = new Float64Array(n / 2);
+    for (let k = 0; k < n / 2; k++) { this.cos[k] = Math.cos((2 * Math.PI * k) / n); this.sin[k] = Math.sin((2 * Math.PI * k) / n); }
+  }
+
+  transform(re, im, sign) {
+    const n = this.n, rev = this.rev;
+    for (let i = 0; i < n; i++) {
+      const j = rev[i];
+      if (j > i) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+    }
+    for (let size = 2; size <= n; size *= 2) {
+      const half = size / 2, step = n / size;
+      for (let start = 0; start < n; start += size) {
+        for (let k = 0; k < half; k++) {
+          const c = this.cos[k * step], s = sign * this.sin[k * step];
+          const a = start + k, b = a + half;
+          const tr = re[b] * c - im[b] * s, ti = re[b] * s + im[b] * c;
+          re[b] = re[a] - tr; im[b] = im[a] - ti;
+          re[a] += tr; im[a] += ti;
+        }
+      }
+    }
+  }
+}
+
 export class SphericalHarmonics {
   // M: truncation; nlat, nlon: the Gaussian grid (defaults: the quadratic grid).
   constructor(M, nlat = 2 * Math.ceil((3 * M + 1) / 4), nlon = 2 * Math.ceil((3 * M + 1) / 2)) {
@@ -73,6 +113,7 @@ export class SphericalHarmonics {
       this.cos[m * nlon + k] = Math.cos((2 * Math.PI * m * k) / nlon);
       this.sin[m * nlon + k] = Math.sin((2 * Math.PI * m * k) / nlon);
     }
+    this.fft = (nlon & (nlon - 1)) === 0 && nlon >= 2 * M + 2 ? new FFT(nlon) : null;
   }
 
   index(m, n) { return m * (this.M + 1) - (m * (m - 1)) / 2 + (n - m); }
@@ -112,6 +153,16 @@ export class SphericalHarmonics {
   fourier(grid) {
     const { M, nlat, nlon } = this;
     const re = new Float64Array(nlat * (M + 1)), im = new Float64Array(nlat * (M + 1));
+    if (this.fft) {
+      const xr = new Float64Array(nlon), xi = new Float64Array(nlon);
+      for (let j = 0; j < nlat; j++) {
+        xr.set(grid.subarray ? grid.subarray(j * nlon, (j + 1) * nlon) : grid.slice(j * nlon, (j + 1) * nlon));
+        xi.fill(0);
+        this.fft.transform(xr, xi, -1);
+        for (let m = 0; m <= M; m++) { re[j * (M + 1) + m] = xr[m] / nlon; im[j * (M + 1) + m] = xi[m] / nlon; }
+      }
+      return { re, im };
+    }
     for (let j = 0; j < nlat; j++) {
       const row = j * nlon;
       for (let m = 0; m <= M; m++) {
@@ -127,6 +178,21 @@ export class SphericalHarmonics {
   // A grid field from Fourier coefficients: f_k = F_0 + 2 Re sum_{m>0} F_m e^{i m lambda_k}.
   fromFourier(F, out = new Float64Array(this.nlat * this.nlon)) {
     const { M, nlat, nlon } = this;
+    if (this.fft) {
+      // f_k = sum over m = -M..M of F_m e^{i m lambda_k}, with F_{-m} = conj(F_m).
+      const xr = new Float64Array(nlon), xi = new Float64Array(nlon);
+      for (let j = 0; j < nlat; j++) {
+        xr.fill(0); xi.fill(0);
+        xr[0] = F.re[j * (M + 1)];
+        for (let m = 1; m <= M; m++) {
+          const a = F.re[j * (M + 1) + m], b = F.im[j * (M + 1) + m];
+          xr[m] = a; xi[m] = b; xr[nlon - m] = a; xi[nlon - m] = -b;
+        }
+        this.fft.transform(xr, xi, 1);
+        out.set(xr, j * nlon);
+      }
+      return out;
+    }
     for (let j = 0; j < nlat; j++) {
       for (let k = 0; k < nlon; k++) {
         let s = F.re[j * (M + 1)];

@@ -29,6 +29,7 @@ Decisions that concern only one library are recorded in that library's own `deve
 | [0016](0016-maps-of-bodies-and-iau-rotation.md) | Maps of the bodies, IAU rotation, and imagery shared across applications | Accepted, provisionally |
 | [0017](0017-climate-classes-and-normals.md) | Climate classes, climate normals, and two new ways of acquiring data | Accepted, provisionally |
 | [0018](0018-fine-relief-at-close-range.md) | Fine relief at close range, and a finer base map | Accepted, provisionally |
+| [0019](0019-shallow-water-model.md) | A second laboratory model: the shallow-water equations | Accepted, provisionally |
 
 ## 2. Template
 

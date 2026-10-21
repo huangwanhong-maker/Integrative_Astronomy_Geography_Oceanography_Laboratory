@@ -19,6 +19,8 @@ import { displayUnit, toShown, toStored, format } from '../src/core/units.js';
 import { joinCountries, valueForYear, latestWellCoveredYear } from '../src/core/join.js';
 import { gaussLegendre, SphericalHarmonics, EARTH_RADIUS as RADIUS, OMEGA } from '../src/core/spectral.js';
 import { BarotropicModel, GRAVITY } from '../src/core/barotropic.js';
+import { ShallowWaterModel, lanczosWeights } from '../src/core/shallowwater.js';
+import { FFT } from '../src/core/spectral.js';
 import { koppen, koppenQuantities, koppenGrid, KOPPEN_CODES, dryMonths, meanTemperature } from '../src/core/climate.js';
 import { ClassRaster } from '../src/core/grid.js';
 import { precipitationScale, climateDiagram } from '../src/ui/climate.js';
@@ -410,6 +412,105 @@ const random = seeded(20261022);
     check('field: quantisation error at most half a step', v.scale / 2 - (v.max - v.min) / 130000, 1e-9);
   } else {
     console.log('skip  field: fields-gfs-forecast missing');
+  }
+}
+
+// ---- the fast Fourier transform ------------------------------------------------------
+{
+  const n = 64, fft = new FFT(n), rnd = seeded(3);
+  const x = Float64Array.from({ length: n }, () => rnd() - 0.5), y = Float64Array.from({ length: n }, () => rnd() - 0.5);
+  const re = Float64Array.from(x), im = Float64Array.from(y);
+  fft.transform(re, im, -1);
+  let err = 0;
+  for (let m = 0; m < n; m++) {
+    let a = 0, b = 0;
+    for (let k = 0; k < n; k++) { const t = (-2 * Math.PI * m * k) / n; a += x[k] * Math.cos(t) - y[k] * Math.sin(t); b += x[k] * Math.sin(t) + y[k] * Math.cos(t); }
+    err = Math.max(err, Math.abs(a - re[m]), Math.abs(b - im[m]));
+  }
+  check('fft: 64 points agree with the direct sum', err, 1e-12);
+  fft.transform(re, im, 1);
+  check('fft: forward then backward returns n times the data', Math.max(...x.map((v, k) => Math.abs(re[k] / n - v))), 1e-14);
+}
+
+// ---- the shallow-water model ----------------------------------------------------------
+{
+  // Williamson et al. (1992), test case 2: steady, nonlinear, zonal geostrophic
+  // flow, here also about an axis tilted by 45 degrees so that it crosses the
+  // grid's poles. h and the wind are exact at any truncation (degrees <= 2).
+  const case2 = (model, alpha) => {
+    const sh = model.sh, n = sh.nlat * sh.nlon;
+    const u0 = (2 * Math.PI * RADIUS) / (12 * 86400), gh0 = 2.94e4;
+    const u = new Float64Array(n), v = new Float64Array(n), z = new Float64Array(n);
+    for (let j = 0; j < sh.nlat; j++) {
+      const phi = Math.asin(sh.mu[j]);
+      for (let k = 0; k < sh.nlon; k++) {
+        const lam = (2 * Math.PI * k) / sh.nlon, i = j * sh.nlon + k;
+        u[i] = u0 * (Math.cos(phi) * Math.cos(alpha) + Math.cos(lam) * Math.sin(phi) * Math.sin(alpha));
+        v[i] = -u0 * Math.sin(lam) * Math.sin(alpha);
+        const s = -Math.cos(lam) * Math.cos(phi) * Math.sin(alpha) + Math.sin(phi) * Math.cos(alpha);
+        z[i] = (gh0 - (RADIUS * OMEGA * u0 + (u0 * u0) / 2) * s * s) / GRAVITY;
+      }
+    }
+    return { u, v, z };
+  };
+  const l2 = (sh, x, y) => {
+    let s = 0, t = 0;
+    for (let j = 0; j < sh.nlat; j++) for (let k = 0; k < sh.nlon; k++) { const i = j * sh.nlon + k; s += sh.w[j] * (x[i] - y[i]) ** 2; t += sh.w[j] * y[i] ** 2; }
+    return Math.sqrt(s / t);
+  };
+  for (const [alpha, what] of [[0, 'about the pole'], [Math.PI / 4, 'across the poles']]) {
+    const m = new ShallowWaterModel({ truncation: 21, dampingHours: 0, tilt: alpha });
+    const { u, v, z } = case2(m, alpha);
+    m.setState(u, v, z, { divergent: true });
+    const h0 = m.sh.synthesise(m.state.phi), mass0 = m.invariants().mass;
+    for (let s = 0; s < 96; s++) m.step(900);
+    check(`shallow water: Williamson case 2, steady flow ${what}, height after a day`, l2(m.sh, m.sh.synthesise(m.state.phi), h0), 1e-12);
+    if (alpha) check('shallow water: mass kept', (m.invariants().mass - mass0) / mass0, 1e-13);
+  }
+  // Energy over a day of a random, unbalanced flow (no damping).
+  {
+    const m = new ShallowWaterModel({ truncation: 21, dampingHours: 0 });
+    const sh = m.sh, rnd = seeded(17), n = sh.nlat * sh.nlon;
+    const u = new Float64Array(n), v = new Float64Array(n), z = new Float64Array(n);
+    const waves = [...Array(6)].map(() => [1 + Math.floor(5 * rnd()), 2 * Math.PI * rnd(), 1 + Math.floor(4 * rnd()), 10 * (rnd() - 0.5)]);
+    for (let j = 0; j < sh.nlat; j++) {
+      const phi = Math.asin(sh.mu[j]);
+      for (let k = 0; k < sh.nlon; k++) {
+        const lam = (2 * Math.PI * k) / sh.nlon, i = j * sh.nlon + k;
+        u[i] = 20 * Math.cos(phi); z[i] = 5500;
+        for (const [mm, ph, l, amp] of waves) { u[i] += amp * Math.cos(phi) * Math.cos(mm * lam + ph) * Math.cos(l * phi); z[i] += 8 * amp * Math.cos(phi) ** 2 * Math.sin(mm * lam + ph); }
+      }
+    }
+    m.setState(u, v, z);
+    const e0 = m.invariants().energy;
+    for (let s = 0; s < 96; s++) m.step(900);
+    check('shallow water: energy kept over a day of unbalanced flow', (m.invariants().energy - e0) / e0, 1e-6);
+  }
+  // Gravity waves on a non-rotating sphere: a height of degree n oscillates with
+  // frequency sqrt(g H n (n + 1)) / a (Lamb 1932, sec. 307).
+  const wave = (H, n, truncation = 21) => {
+    const m = new ShallowWaterModel({ truncation, omega: 0, dampingHours: 0 });
+    m.state.phi.re[0] = (GRAVITY * H) / Math.sqrt(0.5);
+    const k = m.sh.index(0, n);
+    m.state.phi.re[k] = GRAVITY;
+    return { m, k, period: (2 * Math.PI * RADIUS) / Math.sqrt(GRAVITY * H * n * (n + 1)) };
+  };
+  {
+    const { m, k, period } = wave(1000, 5);
+    for (let s = 0; s < 100; s++) m.step(period / 200);
+    const half = m.state.phi.re[k] / GRAVITY;
+    for (let s = 0; s < 100; s++) m.step(period / 200);
+    check('shallow water: a gravity wave (n = 5, H = 1 km, 20.5 h) is reversed after half a period', half + 1, 1e-5);
+    check('shallow water: and restored after a whole period', m.state.phi.re[k] / GRAVITY - 1, 1e-5);
+  }
+  // The digital filter (Lynch and Huang 1992) removes fast waves and keeps slow ones.
+  {
+    const fast = wave(10000, 20), slow = wave(1000, 2);
+    fast.m.initialise({ dt: 300, spanHours: 6, cutoffHours: 6 });
+    slow.m.initialise({ dt: 300, spanHours: 6, cutoffHours: 6 });
+    const a = fast.m.state.phi.re[fast.k] / GRAVITY, b = slow.m.state.phi.re[slow.k] / GRAVITY;
+    assert('digital filter: a gravity wave of 1.7 h is removed, one of 46 h kept', Math.abs(a) < 0.01 && b > 0.98, `amplitudes ${a.toFixed(4)} and ${b.toFixed(4)}`);
+    check('digital filter: its weights sum to one', lanczosWeights(12, 0.26).reduce((x, y) => x + y, 0) - 1, 1e-14);
   }
 }
 

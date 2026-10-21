@@ -1,8 +1,8 @@
 # Earth Atlas
 
-*Status: draft (2026-10-22). Kind: tool. Field: geography (cartography), showing data from meteorology, oceanography, geography and geophysics.* Decision records: [ADR 0014](../../../development/decisions/0014-earth-atlas-separated-data-and-typed-layers.md), [ADR 0015](../../../development/decisions/0015-earth-atlas-models-imagery-detail.md), [ADR 0017](../../../development/decisions/0017-climate-classes-and-normals.md), [ADR 0018](../../../development/decisions/0018-fine-relief-at-close-range.md).
+*Status: draft (2026-10-22). Kind: tool. Field: geography (cartography), showing data from meteorology, oceanography, geography and geophysics.* Decision records: [ADR 0014](../../../development/decisions/0014-earth-atlas-separated-data-and-typed-layers.md), [ADR 0015](../../../development/decisions/0015-earth-atlas-models-imagery-detail.md), [ADR 0017](../../../development/decisions/0017-climate-classes-and-normals.md), [ADR 0018](../../../development/decisions/0018-fine-relief-at-close-range.md), [ADR 0019](../../../development/decisions/0019-shallow-water-model.md).
 
-The Earth Atlas shows the atmosphere, the ocean, the land and the people of the Earth on one globe, at one instant. Each kind of data comes from its own dataset and is joined to the map only here, in the application. Forecasts from several models can be compared, among them a model of our own that runs in the page. Climates can be read too: their classes from 1901 to 2099, and the normal year of any place. The map itself is one dataset among others, and carries no values but names and places.
+The Earth Atlas shows the atmosphere, the ocean, the land and the people of the Earth on one globe, at one instant. Each kind of data comes from its own dataset and is joined to the map only here, in the application. Forecasts from several models can be compared, among them two models of our own that run in the page. Climates can be read too: their classes from 1901 to 2099, and the normal year of any place. The map itself is one dataset among others, and carries no values but names and places.
 
 ## 1. Concepts
 
@@ -21,7 +21,7 @@ The Earth Atlas shows the atmosphere, the ocean, the land and the people of the 
   - **events**;
   - the **base map:** relief, satellite imagery, or plain; plus forecast clouds, lights at night, coasts, boundaries, rivers, the graticule with the tropics and polar circles, names, and day and night.
 - **Fields recognised by standard name and level.** A field with a known CF standard name is drawn in that quantity's style at its level, for example geopotential height at 500 hPa. A field with an unknown one is drawn in a style fitted to its own range.
-- **Models as a choice.** The same quantity from several models (GFS, NOAA's AI model AIGFS, the AIGEFS ensemble, our own) is one layer with a choice of model.
+- **Models as a choice.** The same quantity from several models (GFS, NOAA's AI model AIGFS, the AIGEFS ensemble, our own two) is one layer with a choice of model.
   - Any two models can be shown as a difference.
   - The place card gives each model's value and draws their courses together.
   - Ensemble spread is a layer of its own.
@@ -30,7 +30,11 @@ The Earth Atlas shows the atmosphere, the ocean, the land and the people of the 
   - The atlas also classifies the TerraClimate normals of 1991–2020 itself and offers the result beside the published map.
   - Monthly normals of temperature and precipitation follow the month of the time shown.
   - The place card draws the normal year of any place on land as a climate diagram (Walter and Lieth 1960).
-- **Our own model.** The barotropic vorticity equation runs in the page from the GFS analysis, the same equation as the first numerical weather prediction (1950). It is verified against later analyses and against persistence.
+- **Our own models.** Two models run in the page from the GFS analysis at 500 hPa:
+  - the barotropic vorticity equation, that of the first numerical weather prediction (1950);
+  - the shallow-water equations, started by a digital filter, which keep divergence and gravity waves and slow the longest waves.
+
+  Both are verified against later analyses and against persistence, side by side.
 - **One instant, in UTC.**
   - Each layer shows its data nearest to that instant, and says which time it shows.
   - When that time differs from the instant shown, the legend says by how much, for example "Data from 30 h before the time shown".
@@ -105,7 +109,7 @@ The ERDDAP servers add: "The data may be used and redistributed for free but is 
 | Flat maps | Equal Earth, equal-area, as the default. Equirectangular shows the data grid as it is. | Šavrič, Patterson and Jenny (2018); [theory note](../../../theory/geography/equal-area-maps.md) |
 | Particles | The midpoint rule on the sphere, with parallel transport. Exact for flow along a great circle; second-order otherwise. | `src/core/flow.js`, [theory note](../../../theory/meteorology/particles-on-the-sphere.md) |
 | Wave energy | Deep-water group speed c_g = g T / 4π, along the peak direction | Holthuijsen (2007); [theory note](../../../theory/oceanography/wave-energy-propagation.md) |
-| Our model | The barotropic vorticity equation, spectral transform method at T42 (Gaussian grid 128 × 64), Runge–Kutta 4 with 30-minute steps and ∇⁴ damping. Heights from linear balance, added as changes to the analysis. | `src/core/spectral.js`, `src/core/barotropic.js`; [theory note](../../../theory/meteorology/barotropic-vorticity-model.md) |
+| Our models | Spectral transform method at T42 (Gaussian grid 128 × 64, FFTs in longitude), Runge–Kutta 4 and ∇⁴ damping. The barotropic vorticity equation in steps of 30 min, heights from linear balance added as changes to the analysis. The shallow-water equations in vorticity–divergence form, in steps of 15 min, from the analysed wind and height after a digital filter of six hours. | `src/core/spectral.js`, `src/core/barotropic.js`, `src/core/shallowwater.js`; theory notes on the [barotropic](../../../theory/meteorology/barotropic-vorticity-model.md) and [shallow-water](../../../theory/meteorology/shallow-water-model.md) models |
 | Model comparison | Differences on a diverging scale fitted to the 98th percentile over the shared forecast. The model's verification is the root-mean-square height error over 20–80° N, against analyses and against persistence. | `src/layers/surface.js`, `src/layers/labmodel.js` |
 | Day and night | Subsolar point from the Astronomical Almanac's low-precision Sun. Sunrise at −0.833°; civil, nautical and astronomical twilight at −6°, −12° and −18°. Lights from the Black Marble on the night side. | [theory note](../../../theory/astronomy/subsolar-point-and-twilight.md) |
 | Imagery and detail | Global images at 8192 × 4096. Gaps in a daily mosaic are filled from the day before; where imagery has none, the relief shows. At close range, a WMS request covers the region in view at the screen's resolution. | `data/products/imagery.py`, `src/layers/imagery.js` |
@@ -123,7 +127,7 @@ The ERDDAP servers add: "The data may be used and redistributed for free but is 
 node applications/geography/earth-atlas/tests/run-tests.mjs
 ```
 
-There are 95 checks. The checks on real data need the products; without them they are skipped.
+There are 105 checks. The checks on real data need the products; without them they are skipped.
 
 | Quantity | Reference | Agreement |
 |---|---|---|
@@ -134,6 +138,11 @@ There are 95 checks. The checks on real data need the products; without them the
 | Barotropic model | Rossby–Haurwitz wave after one day (Haurwitz 1940), amplitude and phase speed | 7 × 10⁻¹⁰ |
 | Barotropic model | Energy and enstrophy over a day of random flow | 2 × 10⁻⁶ and 3 × 10⁻⁵ |
 | Linear balance | Zonal flow, exact height | 5 × 10⁻¹³ m |
+| Shallow-water model | Williamson et al. (1992) case 2, steady flow about the pole and across the poles, one day | 7 × 10⁻¹⁵ and 1 × 10⁻¹⁴ |
+| Shallow-water model | Mass; total energy over a day of unbalanced flow | 6 × 10⁻¹⁶; 6 × 10⁻⁹ |
+| Shallow-water model | Gravity wave of degree 5 on a non-rotating sphere: period √(gH n(n + 1))/a (Lamb 1932) | 3 × 10⁻⁶ after a period |
+| Digital filter | Waves of 1.7 h and 46 h | Amplitudes 0.003 and 0.99 |
+| FFT | Direct sum, 64 points | 1 × 10⁻¹³ |
 | Bilinear interpolation | Linear fields, exact | 6 × 10⁻¹⁴ |
 | Isolines | A circle: points on the level; closed; length 2πr | Within 4 × 10⁻⁴ °; closed; length within 7 × 10⁻⁵ |
 | Particles | Uniform flow along the equator; solid-body rotation, 2000 steps | Exact; latitude kept to 8 × 10⁻⁶ ° |
@@ -156,8 +165,9 @@ The computation in `src/core/` is a provisional stand-in for the laboratory's C+
 | `src/core/sun.js` | The Sun's position, subsolar point, altitude, twilight | `core/domains/astronomy` |
 | `src/core/projections.js` | Equal Earth and equirectangular, forward and inverse | `core/domains/geography` (cartography) |
 | `src/core/grid.js` | Fields: grid positions, interpolation, time brackets, climatological months; computed fields; class maps | `core/inference` |
-| `src/core/spectral.js` | Spherical harmonics, Gaussian grids, spectral transforms | calx, physis (discretisation) |
+| `src/core/spectral.js` | Spherical harmonics, Gaussian grids, spectral transforms, the FFT | calx, physis (discretisation) |
 | `src/core/barotropic.js` | The barotropic vorticity model; linear balance | `core/domains/meteorology` |
+| `src/core/shallowwater.js` | The shallow-water model; digital-filter initialisation | `core/domains/meteorology` |
 | `src/core/climate.js` | Köppen–Geiger classes; dry months after Gaussen | `core/domains/climate` (zones) |
 | `src/core/contour.js` | Isolines, highs and lows | `core/domains/geography` |
 | `src/core/raster.js` | Polygons to rasters, areas | `core/domains/geography` (GIS) |
@@ -167,7 +177,7 @@ The computation in `src/core/` is a provisional stand-in for the laboratory's C+
 | `src/core/join.js` | Joins of data to places by key | `core/domains/geography` (GIS) |
 | `src/data/products.js` | Reads products from the data library | — |
 | `src/layers/` | The catalogue of layers and models; one module per kind of layer; imagery and detail; the laboratory model | `visualization/scene` |
-| `src/workers/` | The laboratory model's integration and the painting of the base map, off the page's main thread | — |
+| `src/workers/` | The laboratory models' integration and the painting of the base map, off the page's main thread | — |
 | `src/render/` | The surface shader, lines, markers, labels, relief, colour maps, colours of classes, the stage | `visualization/renderers` |
 | `src/ui/` | Panel, timeline, legend, place card, climate diagram | — |
 
@@ -175,7 +185,7 @@ The computation in `src/core/` is a provisional stand-in for the laboratory's C+
 
 - Fields are drawn at the resolution of their product (1° for the default forecasts). Finer profiles exist, at a cost in download.
 - The best time series of GFS and AIGFS join past analyses to the latest forecast. Their past is close to analyses; their future is one run's forecast.
-- The laboratory model is barotropic. It has little skill in the tropics, and its long waves drift west too fast (it lacks the equivalent-barotropic correction).
+- The laboratory models have one layer and no topography, moisture or heating. The barotropic model's long waves drift west too fast; the shallow-water model corrects much of that, but neither represents the growth of storms, which needs several levels (the next idea: a primitive-equation model).
 - Fine relief is ASTER's shading, a picture: its elevations are not read, so tints stay those of the 5′ grid. ASTER covers land between about 83° N and 83° S; elsewhere, and on the sea floor, the ETOPO shading remains.
 - Glaciers are drawn from Natural Earth's 1:50 m outlines, coarser than the fine relief.
 - Natural Earth draws boundaries by its de facto depiction; disputed boundaries are dashed.

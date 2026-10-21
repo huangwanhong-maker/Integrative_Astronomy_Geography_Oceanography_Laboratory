@@ -144,18 +144,23 @@ export function buildPanel(el, catalogue, state, years, extra, on) {
   // ---- the laboratory's model ----
   if (extra.lab) {
     const lab = extra.lab;
-    html.push('<h3>Laboratory model</h3>');
-    html.push(`<div class="lab"><p>Barotropic vorticity at 500 hPa, spectral T42, from ${esc(lab.input)}.</p>`);
+    const kinds = [['barotropic', 'Barotropic'], ['shallow-water', 'Shallow water']];
+    html.push('<h3>Laboratory models</h3>');
+    html.push(`<div class="lab"><p>The flow at 500 hPa, spectral T42, from ${esc(lab.input)}: the barotropic vorticity equation of 1950, or the shallow-water equations.</p>`);
     if (lab.running) {
       html.push(`<div class="progress lab-progress"><span style="width:${Math.round(lab.progress * 100)}%"></span></div>`);
     } else {
-      html.push('<button type="button" class="run" data-run-lab>Run from the time shown</button>');
+      html.push(`<div class="runs">${kinds.map(([k, label]) => `<button type="button" class="run" data-run-lab="${k}">Run ${label.toLowerCase()}</button>`).join('')}</div>`);
     }
-    if (lab.verification && lab.verification.length) {
-      html.push(`<table class="verify"><thead><tr><th>Lead</th><th>Model</th><th>Persistence</th></tr></thead><tbody>${lab.verification
-        .filter((r) => r.hours % 24 === 0)
-        .map((r) => `<tr><th>+${r.hours} h</th><td>${Math.round(r.model)} m</td><td>${Math.round(r.persistence)} m</td></tr>`).join('')}</tbody></table>`);
-      html.push(`<p class="note">Root-mean-square error of height, 20–80° N, against ${esc(lab.against)}${lab.verification.some((r) => r.against === 'forecast') ? ' (its forecast, beyond the present)' : ' analyses'}.</p>`);
+    const ran = kinds.filter(([k]) => lab.runs[k] && lab.runs[k].length);
+    if (ran.length) {
+      const leads = lab.runs[ran[0][0]].filter((r) => r.hours % 24 === 0).map((r) => r.hours);
+      const cell = (k, h) => { const r = lab.runs[k].find((x) => x.hours === h); return r ? `${Math.round(r.model)} m` : '—'; };
+      const persistence = (h) => { const r = lab.runs[ran[0][0]].find((x) => x.hours === h); return r ? `${Math.round(r.persistence)} m` : '—'; };
+      html.push(`<table class="verify"><thead><tr><th>Lead</th>${ran.map(([, label]) => `<th>${label}</th>`).join('')}<th>Persistence</th></tr></thead><tbody>${leads
+        .map((h) => `<tr><th>+${h} h</th>${ran.map(([k]) => `<td>${cell(k, h)}</td>`).join('')}<td>${persistence(h)}</td></tr>`).join('')}</tbody></table>`);
+      const all = ran.flatMap(([k]) => lab.runs[k]);
+      html.push(`<p class="note">Root-mean-square error of height, 20–80° N, against ${esc(lab.against)}${all.some((r) => r.against === 'forecast') ? ' (its forecast, beyond the present)' : ' analyses'}.</p>`);
     }
     if (lab.error) html.push(`<p class="note">${esc(lab.error)}</p>`);
     html.push('</div>');
@@ -182,8 +187,7 @@ export function buildPanel(el, catalogue, state, years, extra, on) {
   el.querySelectorAll('button[data-style]').forEach((b) => b.addEventListener('click', () => on.base('style', b.dataset.style)));
   el.querySelectorAll('input[data-base]').forEach((i) => i.addEventListener('change', () => on.base(i.dataset.base, i.checked)));
   el.querySelectorAll('button[data-year]').forEach((b) => b.addEventListener('click', () => on.year(Number(b.dataset.year))));
-  const run = el.querySelector('[data-run-lab]');
-  if (run) run.addEventListener('click', () => on.runLab());
+  el.querySelectorAll('[data-run-lab]').forEach((b) => b.addEventListener('click', () => on.runLab(b.dataset.runLab)));
   const ind = el.querySelector('#indicator');
   if (ind) ind.addEventListener('change', () => on.surface(ind.value));
   el.querySelector('#language').addEventListener('change', (e) => on.base('lang', e.target.value));

@@ -88,6 +88,8 @@ A run from 2026-10-19 00:00 UTC gave the following root-mean-square errors:
 
 These are errors of the right size for a barotropic model. Operational models today make errors of about 10 m at a day and 30 m at three days. The difference measures what baroclinic dynamics, moisture and data assimilation add.
 
+The shallow-water model, started from the same analysis, does better at every lead: see [its note](shallow-water-model.md).
+
 *Caveat.*
 - Over the tropics, where f is small and the flow divergent, the model has little skill. Linear balance there says little about heights.
 - The model also lacks the "equivalent barotropic" divergence term that later versions added (Cressman 1958), so very long waves drift westward too fast.
