@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file guides Claude Code in the laboratory repository. It records the project's purpose, design philosophy, architecture and working conventions.
+This file guides Claude Code in the repository of the Integrative Astronomy, Geography, Oceanography Laboratory ("the laboratory"). It records the project's purpose, design philosophy, architecture and working conventions.
 
 This file can be revised: when a decision recorded here changes, update this file in the same change.
 
@@ -286,10 +286,9 @@ Each module directory contains:
 
 ## 8. Open Decisions
 
-1. **Names.**
-   - The library names calx, morphe and physis are adopted provisionally.
-   - The laboratory's repository says "Geography", whereas the scope includes geometry. Confirm which is intended.
-   - The laboratory's C++ namespace.
+1. **The laboratory's C++ namespace.** The names are settled:
+   - The laboratory is the Integrative Astronomy, Geography, Oceanography Laboratory. The user confirmed "Geography" on 2026-10-22. Geometry remains in scope as a foundation.
+   - The libraries are calx, morphe and physis.
 2. **C++ toolchain** on Windows (MSVC, clang/LLVM or WSL), together with the build and packaging tools.
 3. **Automatic differentiation** in calx, which would be built as an IR transformation.
 4. **Precision policy details** (calx).
@@ -300,12 +299,12 @@ Each module directory contains:
 
 ## 9. Current State
 
-As of 2026-10-21:
+As of 2026-10-22:
 
 - The architecture and decision records 0001–0009 are written.
 - The layered directory structure is in place, with READMEs.
 - The three libraries are scaffolded as their own git repositories and attached under `lib/`.
+- All four repositories are published on GitHub.
 - There is no code yet.
-- The three library repositories still have to be created on GitHub, and nothing has been pushed.
 
 The next step is roadmap Phase 0.

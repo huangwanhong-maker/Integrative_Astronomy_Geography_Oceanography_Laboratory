@@ -4,8 +4,10 @@
 
 ## Phase 0. Foundations
 
-- **Repositories.** Create calx, morphe and physis on GitHub, then push all four repositories.
-- **Names.** Confirm the library names. Settle the laboratory's name ("Geography" or "Geometry") and its C++ namespace.
+- **Repositories.** Done (2026-10-22). All four repositories are published on GitHub.
+- **Names.**
+  - Settled: the Integrative Astronomy, Geography, Oceanography Laboratory, and the libraries calx, morphe and physis.
+  - Still open: the laboratory's C++ namespace.
 - **C++ toolchain.** As of 2026-10-21, the Windows side has no C++ compiler and no CMake. The options are the MSVC Build Tools, LLVM/clang, or WSL.
 - **Build.**
   - A CMake superbuild across `lib/` and `core/`.

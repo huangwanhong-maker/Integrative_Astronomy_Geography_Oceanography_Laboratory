@@ -1,4 +1,4 @@
-# Astronomy, Geometry, Ocean and Atmosphere
+# Integrative Astronomy, Geography, Oceanography Laboratory
 
 This is a long-term programme to learn, use and research astronomy, geometry, oceanography and atmospheric science, including meteorology. It treats them as one connected body of knowledge, in both theory and practice.
 
