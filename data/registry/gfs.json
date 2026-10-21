@@ -2,6 +2,7 @@
   "id": "gfs",
   "kind": "griddap",
   "domain": "meteorology",
+  "model": "GFS",
   "title": "Global Forecast System (GFS): near-surface wind, temperature, pressure, precipitation and radiation, analyses and forecasts",
   "provider": "NOAA National Centers for Environmental Prediction, aggregated as a best time series by PacIOOS ERDDAP (ncep_global)",
   "credit": "GFS, NOAA NCEP, via PacIOOS",

@@ -92,7 +92,9 @@ async function start() {
   chooseDefaults();
 
   progress(0.3, 'Reading the relief…');
-  const relief = [...library.fieldMeta].find(([, m]) => m.variables.some((v) => v.standard_name === 'altitude'));
+  // The finest relief in the library.
+  const relief = [...library.fieldMeta].filter(([, m]) => m.variables.some((v) => v.standard_name === 'altitude'))
+    .sort((a, b) => b[1].grid.nlon - a[1].grid.nlon)[0];
   if (relief) {
     elevation = await library.field(relief[0]);
     loaded.set(relief[0], elevation);
@@ -182,7 +184,7 @@ async function selectSurface(id, render = true) {
   if (def && def.kind === 'indicator') state.indicator = id;
   if (def && def.kind === 'field') track(def.product);
   let compare = find(catalogue.surfaces, state.compare);
-  if (compare && (!def || compare.key !== def.key || compare.id === def.id)) { state.compare = null; compare = null; }
+  if (!compare || !def || compare.key !== def.key || compare.id === def.id) { state.compare = null; compare = null; }
   await surface.select(def, compare, state.time);
   if (def && def.kind === 'indicator') loadIndicator(def.product);
   surface.update(state.time);
@@ -466,8 +468,13 @@ function valueAt(probe, product, lon, lat, t) {
   return { value: product.sample(a, t, lon, lat) };
 }
 
-function formatProbe(probe, r) {
+function probeUnit(probe) {
   const unit = displayUnit(probe.units);
+  return probe.spread ? { ...unit, b: 0 } : unit;
+}
+
+function formatProbe(probe, r) {
+  const unit = probeUnit(probe);
   if (probe.kind === 'vector') {
     if (!Number.isFinite(r.speed)) return null;
     const from = windFromDirection(r.u, r.v);
@@ -531,10 +538,10 @@ function placeCard() {
     ['Local mean solar time', hhmm(localMeanSolarTime(t, lon))],
   ];
   const sections = new Map();
-  const add = (domain, term, html) => {
+  const add = (domain, term, html, kind = '') => {
     const key = DOMAINS[domain] || domain;
     if (!sections.has(key)) sections.set(key, []);
-    sections.get(key).push([term, html]);
+    sections.get(key).push([term, html, kind]);
   };
   const series = [];
   // Probes of the same quantity from several models are shown together.
@@ -545,7 +552,10 @@ function placeCard() {
     groups.get(k).push(probe);
   }
   const models = new Set();
+  const cells = (probe) => { const g = library.fieldMeta.get(probe.product).grid; return g.nlon * g.nlat; };
   for (const list of groups.values()) {
+    // Models in their order; for relief, only the finest product.
+    if (list[0].id === 'elevation') list.splice(0, list.length, list.reduce((a, b) => (cells(b) > cells(a) ? b : a)));
     list.sort((a, b) => modelRank(a.model) - modelRank(b.model));
     const rows = [];
     for (const probe of list) {
@@ -562,15 +572,14 @@ function placeCard() {
     }
     if (!rows.length) continue;
     const [main, ...others] = rows;
-    const more = others.length && list.length > 1
-      ? `<br><span class="dir">${others.map((o) => `${esc(o.probe.model)} ${o.text.replace(/ <span.*$/, '')}`).join(' · ')}</span>` : '';
-    const label = list.length > 1 && rows.length > 1 ? `${main.probe.label}, ${main.probe.model}` : main.probe.label;
-    add(main.probe.domain, label, main.text + timeNote(main.p, t) + more);
+    add(main.probe.domain, main.probe.label, main.text + timeNote(main.p, t) + (others.length ? ` <span class="dir">${esc(main.probe.model)}</span>` : ''));
+    // Other models of the same quantity, beneath it.
+    for (const o of others) add(main.probe.domain, o.probe.model, o.text + timeNote(o.p, t), 'model');
     const lines = [];
     for (const row of rows) {
       const { probe, p, r } = row;
       if (p.times.length < 2 || probe.kind === 'direction') continue;
-      const unit = displayUnit(probe.units);
+      const unit = probeUnit(probe);
       let values = p.series(probe.variables[0], lon, lat);
       if (probe.kind === 'vector') {
         const v = p.series(probe.variables[1], lon, lat);

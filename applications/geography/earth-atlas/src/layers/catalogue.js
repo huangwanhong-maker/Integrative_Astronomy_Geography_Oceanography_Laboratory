@@ -132,7 +132,7 @@ export function buildCatalogue(library) {
       const qid = known ? known.id : v.name;
       const label = known ? `${known.label}${height(v)}${spread ? ', ensemble spread' : ''}` : capital(v.long_name || v.name);
       const shownModel = isMean(v) ? `${model} mean` : model;
-      probes.push({ kind: 'scalar', id: known && known.id, label, model: shownModel, product: name, variables: [v.name], units: v.units, domain, percent: known && known.percent, key: `${qid}|${level}|${spread ? 'spread' : ''}` });
+      probes.push({ kind: 'scalar', id: known && known.id, label, model: shownModel, product: name, variables: [v.name], units: v.units, domain, percent: known && known.percent, spread, key: `${qid}|${level}|${spread ? 'spread' : ''}` });
       if (known && known.base) continue;
       if (v.standard_name === 'cloud_area_fraction' && !spread) clouds.push({ product: name, variable: v.name, model });
       let style;
@@ -143,7 +143,7 @@ export function buildCatalogue(library) {
       } else {
         style = { colormap: 'matter', reverse: true, clip: [0, 0.9], range: null, scale: 'linear', auto: [v.p02, v.p98] };
       }
-      surfaces.push({ id: `${qid}${slug(level)}${spread ? '-spread' : ''}@${name}`, key: `${qid}|${level}|${spread ? 'spread' : ''}`, kind: 'field', label, model: shownModel, product: name, variables: [v.name], domain, units: v.units, level, style, source: source(meta), percent: known && known.percent });
+      surfaces.push({ id: `${qid}${slug(level)}${spread ? '-spread' : ''}@${name}`, key: `${qid}|${level}|${spread ? 'spread' : ''}`, kind: 'field', label, model: shownModel, product: name, variables: [v.name], domain, units: v.units, level, style, source: source(meta), percent: known && known.percent, spread });
       if (spread) continue;
       if (v.standard_name === 'air_pressure_at_sea_level') {
         lines.push({ id: `isobars@${name}`, key: 'isobars|', label: 'Isobars', model: shownModel, product: name, variable: v.name, step: 400, base: 101300, extrema: { radius: 10, prominence: 500, polarRows: 8 }, units: v.units, labelUnits: 'hPa' });

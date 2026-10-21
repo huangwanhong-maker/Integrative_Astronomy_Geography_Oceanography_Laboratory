@@ -2,6 +2,7 @@
   "id": "oisst",
   "kind": "griddap",
   "domain": "oceanography",
+  "model": "OISST",
   "title": "NOAA Optimum Interpolation SST v2.1: daily sea-surface temperature, its anomaly, and sea-ice concentration",
   "provider": "NOAA National Centers for Environmental Information (Huang et al. 2021), preliminary (near-real-time) analyses, served by NOAA CoastWatch ERDDAP (ncdcOisst21NrtAgg_LonPM180)",
   "credit": "OISST v2.1, NOAA NCEI",

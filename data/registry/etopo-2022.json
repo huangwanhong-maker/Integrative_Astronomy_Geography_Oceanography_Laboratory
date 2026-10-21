@@ -2,6 +2,7 @@
   "id": "etopo-2022",
   "kind": "griddap",
   "domain": "geography",
+  "model": "ETOPO 2022",
   "title": "ETOPO 2022 global relief: land topography and ocean bathymetry, ice-sheet surface",
   "provider": "NOAA National Centers for Environmental Information, served by NOAA CoastWatch ERDDAP (ETOPO_2022_v1_15s)",
   "credit": "ETOPO 2022, NOAA NCEI",

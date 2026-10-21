@@ -2,6 +2,7 @@
   "id": "ww3",
   "kind": "griddap",
   "domain": "oceanography",
+  "model": "WaveWatch III",
   "title": "WaveWatch III global wave model: significant wave height, peak period and direction, analyses and forecasts",
   "provider": "NOAA National Centers for Environmental Prediction, aggregated by PacIOOS ERDDAP (ww3_global)",
   "credit": "WaveWatch III, NOAA NCEP, via PacIOOS",

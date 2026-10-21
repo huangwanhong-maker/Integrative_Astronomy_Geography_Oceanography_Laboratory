@@ -106,7 +106,7 @@ def download(url: str, dest: Path, timeout: int = 60, attempts: int = 1) -> None
 def _download(url: str, dest: Path, timeout: int) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_name(dest.name + ".part")
-    request = urllib.request.Request(url, headers={"User-Agent": "laboratory-data-fetch/1"})
+    request = urllib.request.Request(url, headers={"User-Agent": "laboratory-data-fetch/1 (+https://github.com/huangwanhong-maker/Integrative_Astronomy_Geography_Oceanography_Laboratory)"})
     with urllib.request.urlopen(request, timeout=timeout) as response, part.open("wb") as out:
         total = int(response.headers.get("Content-Length") or 0)
         done = 0

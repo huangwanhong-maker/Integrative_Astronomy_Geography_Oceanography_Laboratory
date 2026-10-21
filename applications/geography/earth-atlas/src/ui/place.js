@@ -38,7 +38,7 @@ function sparkline(lines) {
 // info: { title, sub, pinned, rows: [[term, html]], sections: [{ heading, rows }],
 //         series: [{ label, now, lines }], models: [{ model, colour }], hint }
 export function renderPlace(el, info) {
-  const rows = (list) => `<dl>${list.map(([dt, dd]) => `<dt>${esc(dt)}</dt><dd>${dd}</dd>`).join('')}</dl>`;
+  const rows = (list) => `<dl>${list.map(([dt, dd, kind]) => `<dt${kind ? ` class="${kind}"` : ''}>${esc(dt)}</dt><dd${kind ? ` class="${kind}"` : ''}>${dd}</dd>`).join('')}</dl>`;
   let html = '';
   if (info.pinned) html += '<button type="button" class="unpin" data-action="unpin" aria-label="Forget this place">✕</button>';
   html += `<h2 class="${info.title.length > 22 ? 'long' : ''}">${esc(info.title)}</h2>`;

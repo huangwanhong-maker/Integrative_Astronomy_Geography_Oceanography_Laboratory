@@ -86,6 +86,8 @@ export class SurfaceLayer {
       if (this.def !== def) return;
       this.product = product;
       this.unit = displayUnit(def.units);
+      // A spread, like a difference, is a size: the offset of the units does not apply.
+      if (def.spread) this.unit = { ...this.unit, b: 0 };
       const st = def.style;
       let range = st.range;
       if (!range) range = niceRange(toShown(st.auto[0], this.unit), toShown(st.auto[1], this.unit));
