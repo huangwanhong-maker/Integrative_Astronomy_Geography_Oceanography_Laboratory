@@ -350,8 +350,11 @@ export function setBase(material, rgba, width, height) {
 }
 
 // An image (HTMLImageElement or canvas) as a global equirectangular texture.
+// Its first row is the north, as in the field textures; three.js would flip an
+// image on upload unless told not to, mirroring it north to south.
 export function imageTexture(image, renderer, global = true) {
   const t = new THREE.Texture(image);
+  t.flipY = false;
   t.wrapS = global ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
   t.wrapT = THREE.ClampToEdgeWrapping;
   t.minFilter = THREE.LinearMipmapLinearFilter;
