@@ -1,6 +1,6 @@
 # theory: Notes and Derivations
 
-*Status: planned.* Knowledge. See [ADR 0006](../development/decisions/0006-theory-notes-in-subject-tree.md), as amended by [ADR 0008](../development/decisions/0008-independent-libraries.md).
+*Status: draft.* Knowledge. See [ADR 0006](../development/decisions/0006-theory-notes-in-subject-tree.md), as amended by [ADR 0008](../development/decisions/0008-independent-libraries.md).
 
 ## 1. Purpose
 

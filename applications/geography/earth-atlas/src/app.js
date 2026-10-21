@@ -1,0 +1,691 @@
+// The Earth Atlas: the atmosphere, the ocean, the land and its people on one
+// globe, each from its own dataset, at one instant.
+//
+// The application composes layers (src/layers/) over a base map, all drawn by
+// the stage (src/render/stage.js), and keeps them at the time shown. Every
+// number it shows is computed by the provisional core (src/core/) from data
+// products of the laboratory's data library (data/products/).
+
+import { Stage } from './render/stage.js';
+import { Labels } from './render/labels.js';
+import { Library } from './data/products.js';
+import { buildCatalogue, DOMAINS, INDICATORS } from './layers/catalogue.js';
+import { BaseLayer } from './layers/base.js';
+import { SurfaceLayer } from './layers/surface.js';
+import { FlowLayer } from './layers/flow.js';
+import { LinesLayer } from './layers/lines.js';
+import { EventsLayer } from './layers/events.js';
+import { Timeline, formatUTC, formatShortUTC, formatDay, formatOffset } from './ui/timeline.js';
+import { renderLegend } from './ui/legend.js';
+import { renderPlace } from './ui/place.js';
+import { buildPanel } from './ui/panel.js';
+import { toVector } from './core/sphere.js';
+import { subsolarPoint, sunAltAz, daylight, localMeanSolarTime } from './core/sun.js';
+import { windFromDirection, compassPoint } from './core/derived.js';
+import { displayUnit, toShown, format } from './core/units.js';
+import { areaMean } from './core/grid.js';
+import { joinCountries, valueForYear, latestWellCoveredYear } from './core/join.js';
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const HOUR = 3600000, DAY = 86400000;
+
+const state = {
+  projection: 'globe',
+  surface: null, flow: null, lines: 'none', events: null, indicator: null,
+  style: 'relief', night: true, coast: true, borders: true, rivers: true, graticule: false, labels: true, reliefOnData: true,
+  lang: 'en',
+  time: Date.now(), live: true, playing: false,
+  pinned: null,
+};
+
+let library, catalogue, stage, base, surface, flow, lines, events, labels, timeline, geography, elevation;
+const loaded = new Map();          // field products in memory, by name
+const indicators = new Map();      // indicator products, by name, with their joins
+let hover = null;
+let dirty = { labels: true, legend: true, place: true };
+let lastPlace = 0;
+
+// ---- loading ------------------------------------------------------------------
+
+function progress(fraction, text) {
+  $('loading-bar').style.width = `${Math.round(fraction * 100)}%`;
+  if (text) $('loading-text').textContent = text;
+}
+
+function fail(html) {
+  const el = $('loading');
+  el.classList.add('failed');
+  $('loading-text').innerHTML = html;
+}
+
+const MISSING_DATA = `The data products are not built yet. From the repository root, run:<br><br>
+<code>python data/acquisition/fetch.py natural-earth-50m etopo-2022 gfs oisst ww3</code><br>
+<code>python data/products/geography.py</code><br>
+<code>python data/products/field_grid.py --source etopo-2022</code><br>
+<code>python data/products/field_grid.py --source gfs</code><br><br>
+and see the README for the other datasets.`;
+
+async function start() {
+  try {
+    progress(0.05, 'Reading the data library…');
+    library = await new Library('data/products').open();
+    if (!library.list('geography').length) throw new Error('no geography');
+    geography = await library.geography();
+  } catch (e) {
+    console.error(e);
+    fail(MISSING_DATA);
+    return;
+  }
+  progress(0.2, 'Drawing the map…');
+  stage = new Stage($('gl'));
+  base = new BaseLayer(stage, geography);
+  catalogue = buildCatalogue(library);
+  restore();
+  chooseDefaults();
+
+  progress(0.3, 'Reading the relief…');
+  const relief = [...library.fieldMeta].find(([, m]) => m.variables.some((v) => v.standard_name === 'altitude'));
+  if (relief) {
+    elevation = await library.field(relief[0]);
+    loaded.set(relief[0], elevation);
+  }
+  await new Promise((r) => setTimeout(r, 0));
+  base.paint(elevation, state.style);
+
+  surface = new SurfaceLayer(stage, library, geography.meta.layers.countries);
+  flow = new FlowLayer(stage, library);
+  lines = new LinesLayer(stage, library);
+  events = new EventsLayer(stage, library);
+  labels = new Labels($('labels'));
+
+  progress(0.5, 'Reading the forecast…');
+  await Promise.all([
+    selectSurface(state.surface, false), selectFlow(state.flow, false),
+    selectLines(state.lines, false), selectEvents(state.events, false),
+  ]);
+  progress(0.95);
+
+  timeline = new Timeline($('timeline'), (t) => { state.live = false; state.playing = false; setTime(t); updatePlay(); remember(); });
+  bind();
+  updateTimeline();
+  applyBase();
+  setProjection(state.projection, true);
+  setTime(state.live ? Date.now() : state.time);
+  renderPanel();
+  $('loading').hidden = true;
+  // For inspection from the browser's console and for automated checks.
+  window.atlas = { state, stage, base, surface, flow, lines, events, library, catalogue, labels };
+  requestAnimationFrame(loop);
+
+  // The rest of the data, for the place card.
+  for (const [name] of library.fieldMeta) track(name);
+  for (const e of library.list('indicators')) loadIndicator(e.name);
+}
+
+function track(name) {
+  if (loaded.has(name)) return Promise.resolve(loaded.get(name));
+  return library.field(name).then((p) => { loaded.set(name, p); dirty.place = true; return p; });
+}
+
+function loadIndicator(name) {
+  if (indicators.has(name)) return indicators.get(name);
+  const promise = library.indicator(name).then((p) => {
+    const join = joinCountries(geography.meta.layers.countries, p.economies);
+    const entry = { product: p, join, latest: latestWellCoveredYear(p.economies, p.years) };
+    indicators.set(name, entry);
+    dirty.place = true;
+    return entry;
+  });
+  indicators.set(name, promise);
+  return promise;
+}
+
+function chooseDefaults() {
+  const ids = (list) => list.map((x) => x.id);
+  if (!state.surface || (state.surface !== 'none' && !ids(catalogue.surfaces).includes(state.surface))) {
+    state.surface = (catalogue.surfaces.find((s) => /^wind@.*:speed$/.test(s.id)) || catalogue.surfaces[0] || { id: 'none' }).id;
+  }
+  if (!state.flow || (state.flow !== 'none' && !ids(catalogue.flows).includes(state.flow))) {
+    state.flow = (catalogue.flows.find((f) => /^wind@/.test(f.id)) || { id: 'none' }).id;
+  }
+  if (state.lines !== 'none' && !ids(catalogue.lines).includes(state.lines)) state.lines = 'none';
+  if (state.events && !ids(catalogue.events).includes(state.events)) state.events = null;
+  const first = catalogue.surfaces.find((s) => s.kind === 'indicator');
+  if (!state.indicator && first) state.indicator = first.id;
+}
+
+// ---- selections ---------------------------------------------------------------
+
+const find = (list, id) => list.find((x) => x.id === id) || null;
+
+async function selectSurface(id, render = true) {
+  state.surface = id;
+  const def = find(catalogue.surfaces, id);
+  if (def && def.kind === 'indicator') state.indicator = id;
+  if (def && def.kind === 'field') track(def.product);
+  await surface.select(def);
+  if (def && def.kind === 'indicator') loadIndicator(def.product);
+  surface.update(state.time);
+  afterChange(render);
+}
+
+async function selectFlow(id, render = true) {
+  state.flow = id;
+  const def = find(catalogue.flows, id);
+  if (def) track(def.product);
+  await flow.select(def);
+  flow.update(state.time);
+  afterChange(render);
+}
+
+async function selectLines(id, render = true) {
+  state.lines = id;
+  await lines.select(find(catalogue.lines, id));
+  lines.update(state.time, true);
+  afterChange(render);
+}
+
+async function selectEvents(id, render = true) {
+  state.events = id;
+  await events.select(find(catalogue.events, id));
+  events.update(state.time, true);
+  afterChange(render);
+}
+
+function afterChange(render) {
+  dirty = { labels: true, legend: true, place: true };
+  if (render) { renderPanel(); updateTimeline(); }
+  remember();
+}
+
+function renderPanel() {
+  const def = find(catalogue.surfaces, state.surface);
+  const years = def && def.kind === 'indicator' && surface.year ? { year: surface.year } : null;
+  buildPanel($('layers'), catalogue, state, years, {
+    surface: (id) => selectSurface(id),
+    flow: (id) => selectFlow(id),
+    lines: (id) => selectLines(id),
+    events: (id) => selectEvents(id),
+    year: (step) => {
+      const p = surface.product;
+      if (!p || !p.years) return;
+      const y = Math.max(p.years[0], Math.min(p.years[p.years.length - 1], surface.year + step));
+      surface.setYear(y);
+      dirty.legend = dirty.place = true;
+      renderPanel();
+    },
+    base: (key, value) => { state[key] = value; applyBase(key); renderPanel(); remember(); },
+  });
+}
+
+function applyBase(key) {
+  const u = stage.material.uniforms;
+  u.uNight.value = state.night ? 1 : 0;
+  u.uReliefOnData.value = state.reliefOnData ? 0.55 : 0;
+  if (key === 'style') base.paint(elevation, state.style);
+  base.show(state);
+  $('labels').hidden = !state.labels;
+  dirty.labels = true;
+}
+
+function setProjection(mode, initial = false) {
+  state.projection = mode;
+  document.querySelectorAll('[data-projection]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.projection === mode)));
+  if (!initial || mode !== stage.mode) stage.setProjection(mode);
+  base.rebuild();
+  base.show(state);
+  if (flow.product) flow.reset();
+  lines.update(state.time, true);
+  events.update(state.time, true);
+  dirty.labels = true;
+  remember();
+}
+
+// ---- time ---------------------------------------------------------------------
+
+function timeDomain() {
+  const domains = [], steps = [];
+  const add = (product) => {
+    if (product && product.times && product.times.length > 1) {
+      domains.push([product.times[0], product.times[product.times.length - 1]]);
+      if (!steps.length) steps.push(...product.times);
+    }
+  };
+  if (surface.def && surface.def.kind === 'field') add(surface.product);
+  add(flow.product);
+  add(lines.product);
+  if (events.product) domains.push(events.window());
+  const now = Date.now();
+  if (!domains.length) return { span: [now - DAY, now + DAY], steps: [], coverage: [] };
+  const t0 = Math.min(...domains.map((d) => d[0])), t1 = Math.max(...domains.map((d) => d[1]));
+  const pad = (t1 - t0) * 0.02;
+  return { span: [Math.min(t0, now) - pad, Math.max(t1, now) + pad], steps, coverage: domains };
+}
+
+function updateTimeline() {
+  const d = timeDomain();
+  timeline.set({ ...d, time: state.time, now: Date.now() });
+  stepTimes = d.steps;
+}
+let stepTimes = [];
+
+function setTime(t) {
+  state.time = t;
+  surface.update(t);
+  flow.update(t);
+  lines.update(t);
+  events.update(t);
+  const sub = subsolarPoint(t);
+  stage.material.uniforms.uSun.value.fromArray(toVector(sub.lon, sub.lat));
+  timeline && timeline.set({ time: t, now: Date.now() });
+  $('time-utc').textContent = formatUTC(t);
+  const note = $('time-note');
+  note.classList.toggle('live', state.live);
+  const ahead = t - Date.now();
+  note.textContent = state.live ? 'now' : Math.abs(ahead) < 60000 ? 'the present' : `${formatOffset(-ahead).replace(' the time shown', ' now').replace('before now', 'ago').replace('after now', 'from now')}`;
+  dirty.legend = dirty.place = dirty.labels = true;
+}
+
+function step(direction) {
+  state.live = false; state.playing = false;
+  const t = state.time;
+  const list = stepTimes.length ? stepTimes : [];
+  let next = direction > 0 ? list.find((s) => s > t + 1000) : [...list].reverse().find((s) => s < t - 1000);
+  if (next === undefined) next = t + direction * HOUR;
+  setTime(next);
+  updatePlay();
+  remember();
+}
+
+function updatePlay() {
+  const b = $('play');
+  b.innerHTML = state.playing
+    ? '<svg viewBox="0 0 24 24"><path d="M6.5 5h4v14h-4zM13.5 5h4v14h-4z"/></svg>'
+    : '<svg viewBox="0 0 24 24"><path d="M7 4.5v15l12.5-7.5z"/></svg>';
+  b.setAttribute('aria-label', state.playing ? 'Pause' : 'Play');
+}
+
+// ---- interaction ----------------------------------------------------------------
+
+function bind() {
+  document.querySelectorAll('[data-projection]').forEach((b) => b.addEventListener('click', () => setProjection(b.dataset.projection)));
+  $('now').addEventListener('click', () => { state.live = true; state.playing = false; setTime(Date.now()); updatePlay(); remember(); });
+  $('back').addEventListener('click', () => step(-1));
+  $('forward').addEventListener('click', () => step(1));
+  $('play').addEventListener('click', () => {
+    state.playing = !state.playing;
+    state.live = false;
+    const [a, b] = timeline.span;
+    if (state.playing && state.time >= b - HOUR) setTime(a);
+    updatePlay();
+  });
+  updatePlay();
+  $('data-link').addEventListener('click', () => {
+    renderAbout();
+    $('about').showModal();
+    $('about').scrollTop = 0;
+  });
+  $('place').addEventListener('click', (e) => {
+    if (e.target.closest('[data-action="unpin"]')) { state.pinned = null; dirty.place = dirty.labels = true; remember(); }
+  });
+  stage.on('hover', (place, e) => {
+    if (!place || !e) { hover = null; $('tooltip').hidden = true; return; }
+    const r = $('gl').getBoundingClientRect();
+    hover = { lon: place[0], lat: place[1], x: e.clientX - r.left, y: e.clientY - r.top };
+    showTooltip();
+  });
+  stage.on('click', (place) => {
+    if (!place) return;
+    state.pinned = [place[0], place[1]];
+    dirty.place = dirty.labels = true;
+    remember();
+  });
+  stage.on('change', () => { dirty.labels = true; });
+  window.addEventListener('keydown', (e) => {
+    if (e.target.closest('input, select, textarea')) return;
+    if (e.key === 'ArrowRight') step(1);
+    else if (e.key === 'ArrowLeft') step(-1);
+    else if (e.key === ' ') { e.preventDefault(); $('play').click(); }
+  });
+}
+
+function placeName(lon, lat) {
+  const i = base.countryAt(lon, lat);
+  const lang = state.lang;
+  const pick = (names) => names[lang] || names.en || names.default;
+  if (i >= 0) return { kind: 'country', index: i, country: geography.meta.layers.countries[i], name: pick(geography.meta.layers.countries[i].names) };
+  const sea = base.seaAt(lon, lat);
+  if (sea) return { kind: 'sea', name: pick(sea.names), sea };
+  return { kind: 'none', name: '' };
+}
+
+function showTooltip() {
+  const tip = $('tooltip');
+  if (!hover) { tip.hidden = true; return; }
+  const quake = events.product ? events.pick(hover.x, hover.y) : null;
+  let html;
+  if (quake) {
+    html = `<span class="v">M ${quake.mag.toFixed(1)}</span> · ${format(quake.depth_km)} km deep<br><span class="n">${esc(quake.place || '')}</span><br>${formatShortUTC(quake.time_ms)}`;
+  } else {
+    const name = placeName(hover.lon, hover.lat).name;
+    const value = surfaceValueText(hover.lon, hover.lat, hover);
+    if (!value && !name) { tip.hidden = true; return; }
+    html = `${value ? `<span class="v">${value}</span>` : ''}${value && name ? ' · ' : ''}${name ? `<span class="n">${esc(name)}</span>` : ''}`;
+  }
+  tip.innerHTML = html;
+  tip.style.left = `${hover.x}px`;
+  tip.style.top = `${hover.y}px`;
+  tip.hidden = false;
+}
+
+function surfaceValueText(lon, lat) {
+  const def = surface.def;
+  if (!def || !surface.product) return '';
+  if (def.kind === 'indicator') {
+    const i = base.countryAt(lon, lat);
+    const v = i >= 0 && surface.values && surface.values[i];
+    return v ? `${format(v.value)} ${esc(def.units || '')}${v.year !== surface.year ? ` (${v.year})` : ''}` : '';
+  }
+  const x = surface.sample(lon, lat, state.time);
+  if (!Number.isFinite(x)) return '';
+  return `${format(toShown(x, surface.unit))} ${esc(surface.unit.unit)}`;
+}
+
+// ---- the place card ---------------------------------------------------------------
+
+function coords(lon, lat) {
+  return `${Math.abs(lat).toFixed(2)}° ${lat >= 0 ? 'N' : 'S'}, ${Math.abs(lon).toFixed(2)}° ${lon >= 0 ? 'E' : 'W'}`;
+}
+
+function hhmm(hours) {
+  const m = Math.round(hours * 60) % 1440;
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+}
+
+function valueAt(probe, product, lon, lat, t) {
+  const [a, b] = probe.variables;
+  if (probe.kind === 'vector') {
+    const u = product.sample(a, t, lon, lat), v = product.sample(b, t, lon, lat);
+    return { u, v, speed: Math.hypot(u, v) };
+  }
+  if (probe.kind === 'direction') return { value: product.sampleDirection(a, t, lon, lat) };
+  return { value: product.sample(a, t, lon, lat) };
+}
+
+function formatProbe(probe, r) {
+  const unit = displayUnit(probe.units);
+  if (probe.kind === 'vector') {
+    if (!Number.isFinite(r.speed)) return null;
+    const from = windFromDirection(r.u, r.v);
+    const dir = Number.isFinite(from) ? ` <span class="dir">from ${compassPoint(from)}</span>` : '';
+    return `${format(toShown(r.speed, unit))} ${esc(unit.unit)}${dir}`;
+  }
+  if (!Number.isFinite(r.value)) return null;
+  if (probe.kind === 'direction') return `from ${compassPoint(r.value)} <span class="dir">${Math.round(r.value)}°</span>`;
+  if (probe.percent) return `${format(r.value * 100)} %`;
+  const shown = toShown(r.value, unit);
+  // Rates of precipitation below 0.05 mm/h are below what the model resolves.
+  if (unit.unit === 'mm/h' && shown < 0.05) return `0 ${esc(unit.unit)}`;
+  return `${format(shown)} ${esc(unit.unit)}`;
+}
+
+function timeNote(product, t) {
+  if (!product.times.length) return '';
+  const b = product.bracket(t);
+  if (b.offset && Math.abs(b.offset) > HOUR) return ` <span class="dir">${formatDay(b.shown).replace(/ \d{4}$/, '')}</span>`;
+  return '';
+}
+
+function placeCard() {
+  const t = state.time;
+  const sub = subsolarPoint(t);
+  if (!state.pinned) {
+    const rows = [['Sun overhead at', coords(sub.lon, sub.lat)]];
+    const def = surface.def;
+    if (def && def.kind === 'field' && surface.product) {
+      const p = surface.product, b = p.bracket(t, def.variables[0]);
+      const mean = (name) => {
+        const a = areaMean(p.slice(name, Math.max(0, b.i0)), p.grid);
+        return b.w > 0 ? a + (areaMean(p.slice(name, b.i1), p.grid) - a) * b.w : a;
+      };
+      if (def.variables.length === 1) {
+        const m = mean(def.variables[0]);
+        if (Number.isFinite(m)) rows.push([`Mean ${def.label.charAt(0).toLowerCase()}${def.label.slice(1)}`, `${format(toShown(m, surface.unit))} ${esc(surface.unit.unit)}`]);
+      }
+    } else if (def && def.kind === 'indicator' && surface.product) {
+      const w = surface.product.aggregates.WLD;
+      const r = w && valueForYear(w, surface.product.years, surface.year, 0);
+      if (r) rows.push([`World, ${r.year}`, `${format(r.value)} ${esc(def.units || '')}`]);
+    }
+    if (events.product) {
+      const f = events.index;
+      const shown = events.shown;
+      if (shown.length) {
+        const big = shown.reduce((m, e) => (e[f.mag] > m[f.mag] ? e : m), shown[0]);
+        rows.push(['Earthquakes shown', String(shown.length)]);
+        rows.push(['Largest', `M ${big[f.mag].toFixed(1)} <span class="dir">${esc(big[f.place] || '')}</span>`]);
+      }
+    }
+    return { title: 'The Earth', sub: formatUTC(t), rows, hint: 'Choose a place on the map.' };
+  }
+
+  const [lon, lat] = state.pinned;
+  const where = placeName(lon, lat);
+  const sun = sunAltAz(lon, lat, sub);
+  const rows = [
+    ['Sun’s altitude', `${sun.altitude.toFixed(0).replace('-', '−')}° <span class="dir">${daylight(sun.altitude)}</span>`],
+    ['Local mean solar time', hhmm(localMeanSolarTime(t, lon))],
+  ];
+  const sections = new Map();
+  const add = (domain, term, html) => {
+    const key = DOMAINS[domain] || domain;
+    if (!sections.has(key)) sections.set(key, []);
+    sections.get(key).push([term, html]);
+  };
+  const series = [];
+  for (const probe of catalogue.probes) {
+    const p = loaded.get(probe.product);
+    if (!p) continue;
+    if (probe.id === 'elevation') {
+      const z = p.sample(probe.variables[0], t, lon, lat);
+      if (Number.isFinite(z)) add('geography', z >= 0 ? 'Elevation' : 'Depth', `${format(Math.abs(z))} m`);
+      continue;
+    }
+    const r = valueAt(probe, p, lon, lat, t);
+    const text = formatProbe(probe, r);
+    if (!text) continue;
+    add(probe.domain, probe.label, text + timeNote(p, t));
+    if (p.times.length > 1 && probe.kind !== 'direction') {
+      const unit = displayUnit(probe.units);
+      let values = p.series(probe.variables[0], lon, lat);
+      if (probe.kind === 'vector') {
+        const v = p.series(probe.variables[1], lon, lat);
+        values = values.map((u, i) => Math.hypot(u, v[i]));
+      }
+      const shown = values.map((v) => (probe.percent ? v * 100 : toShown(v, unit)));
+      const cursor = { time: t, value: probe.kind === 'vector' ? toShown(r.speed, unit) : probe.percent ? r.value * 100 : toShown(r.value, unit) };
+      series.push({ label: probe.kind === 'vector' ? `${probe.label} speed` : probe.label, now: text.replace(/ <span.*$/, ''), times: p.times, values: shown, cursor });
+    }
+  }
+  const order = ['meteorology', 'oceanography', 'climate', 'geography', 'geophysics'].map((d) => DOMAINS[d]);
+  const ordered = [...sections].sort((a, b) => (order.indexOf(a[0]) + 1 || 99) - (order.indexOf(b[0]) + 1 || 99));
+  if (where.kind === 'country') {
+    const rowsC = [];
+    for (const e of library.list('indicators')) {
+      const entry = indicators.get(e.name);
+      if (!entry || entry instanceof Promise) continue;
+      const code = entry.join.codes[where.index];
+      if (!code) continue;
+      const def = find(catalogue.surfaces, `indicator:${e.name}`);
+      const year = def && def.id === state.surface ? surface.year : entry.latest;
+      const r = valueForYear(entry.product.economies[code], entry.product.years, year, 4);
+      const [label, unit] = INDICATORS[e.code] || [e.quantity || e.title, e.unit || ''];
+      if (r) rowsC.push([`${label}, ${r.year}`, `${format(r.value)}${unit ? ` <span class="dir">${esc(unit)}</span>` : ''}`]);
+    }
+    if (rowsC.length) ordered.push([`${where.name}, World Bank`, rowsC]);
+  }
+  const sub2 = where.kind === 'country' ? [coords(lon, lat), where.country.subregion].filter(Boolean).join(' · ') : coords(lon, lat);
+  return {
+    title: where.name || (lat < -60 ? 'Antarctica' : 'Open water'),
+    sub: sub2,
+    pinned: true,
+    rows,
+    sections: ordered.map(([heading, r]) => ({ heading, rows: r })),
+    series,
+  };
+}
+
+// ---- legend, labels, credits, about ---------------------------------------------
+
+function legendData() {
+  const out = {};
+  const lg = surface.legend();
+  if (lg) {
+    const def = surface.def;
+    if (def.kind === 'field') {
+      const p = surface.product, b = surface.shown || p.bracket(state.time);
+      const credit = (p.meta.source && p.meta.source.credit) || '';
+      const when = p.times.length ? (b.offset ? formatShortUTC(b.shown) : 'interpolated in time') : '';
+      lg.note = [credit, p.times.length === 1 ? `daily mean, ${formatDay(p.times[0])}` : when].filter(Boolean).join(' · ');
+      if (b.offset && Math.abs(b.offset) > HOUR) lg.offset = `Data from ${formatOffset(b.offset)}`;
+    } else {
+      lg.title = `${def.label}, ${surface.year}`;
+      lg.note = `${(surface.product.source && surface.product.source.credit) || 'World Bank'} · by country`;
+    }
+    out.surface = lg;
+  }
+  if (flow.def && flow.product) {
+    const realPerFrame = 0.16 / stage.pixelsPerMetre();
+    const factor = realPerFrame * 60;
+    const b = flow.product.bracket(state.time);
+    const speed = Math.round(factor / 1000) * 1000;
+    out.flow = {
+      title: flow.def.label,
+      note: `${flow.def.kind === 'waves' ? 'At the group speed g T / 4π, ' : ''}shown ${speed.toLocaleString('en-GB')} times faster than real`,
+      offset: b.offset && Math.abs(b.offset) > HOUR ? `Data from ${formatOffset(b.offset)}` : '',
+    };
+  }
+  if (lines.def && lines.product) {
+    const step = lines.def.step * displayUnit(lines.def.units, lines.def.labelUnits).a;
+    out.lines = { title: lines.def.label, unit: `every ${+step.toPrecision(3)} ${lines.def.labelUnits}` };
+  }
+  if (events.def && events.product) {
+    const w = events.product.window;
+    out.events = { title: 'Earthquakes', count: `${events.shown.length}`, note: `M ≥ ${events.product.selection.min_magnitude} · ${formatDay(Date.parse(w.start))} to the time shown · ${(events.product.source && events.product.source.credit) || 'USGS'}` };
+  }
+  return out;
+}
+
+function updateCredits() {
+  const credits = new Set(['Natural Earth']);
+  if (elevation && elevation.meta.source.credit) credits.add(elevation.meta.source.credit);
+  for (const p of [surface.def && surface.def.kind === 'field' && surface.product, flow.product, lines.product]) {
+    if (p && p.meta && p.meta.source.credit) credits.add(p.meta.source.credit);
+  }
+  if (surface.def && surface.def.kind === 'indicator' && surface.product) credits.add(surface.product.source.credit);
+  if (events.product) credits.add(events.product.source.credit);
+  $('credits').textContent = [...credits].filter(Boolean).join(' · ');
+}
+
+function updateLabels() {
+  const items = [];
+  if (state.pinned) {
+    items.push({ key: 'pin', text: '', html: '', lon: state.pinned[0], lat: state.pinned[1], className: 'pin', font: '12px serif', size: 18, always: true });
+  }
+  if (lines.def && lines.marks.length) {
+    for (const m of lines.marks) {
+      items.push({ key: `x${m.lon},${m.lat}`, text: `${m.text} ${m.value}`, html: `${m.text}<small>${m.value}</small>`, lon: m.lon, lat: m.lat, className: `pressure ${m.kind}`, font: '600 15px serif', size: 26, always: true });
+    }
+  }
+  if (state.labels) items.push(...base.labelItems(stage.zoomLevel(), state.lang));
+  labels.update(items, (lon, lat) => stage.screen(lon, lat), stage.width, stage.height);
+}
+
+function renderAbout() {
+  const rows = [];
+  const add = (title, s, extra = '') => {
+    if (!s) return;
+    rows.push(`<dt>${esc(title)}</dt><dd>${esc(s.provider || '')}${s.licence ? `. Licence: ${esc(s.licence)}` : ''}${s.citation ? `<br><i>${esc(s.citation)}</i>` : ''}${s.retrieved_at ? `<br>Retrieved ${esc(s.retrieved_at)}${s.profile ? `, profile ${esc(s.profile)}` : ''}.` : ''}${extra}</dd>`);
+  };
+  add('Base geography', geography.meta.source);
+  const readable = (url) => { try { return decodeURIComponent(url); } catch { return url; } };
+  for (const [, m] of library.fieldMeta) add(m.title, m.source, m.source.request ? `<br><code>${esc(readable(m.source.request))}</code>` : '');
+  const ind = library.list('indicators');
+  if (ind.length) add(`Indicators by country (${ind.length})`, { ...ind[0].source, licence: 'CC BY 4.0' });
+  for (const e of library.list('events')) add(e.title, e.source);
+  rows.push(`<dt>Method</dt><dd>Fields are interpolated bilinearly in space and linearly in time between the stored steps; a place near missing values takes the mean of the valid neighbours carrying at least half the weight. Wind direction is the direction it comes from. Wave energy travels at the deep-water group speed g T / 4π along the peak direction. The Sun's position follows the Astronomical Almanac's low-precision formulas (0.01°); day, civil, nautical and astronomical twilight are drawn as bands. Countries are joined to indicators by their World Bank and ISO codes; boundaries are Natural Earth's de facto depiction. The Equal Earth projection keeps areas true.</dd>`);
+  $('about-body').innerHTML = `<dl>${rows.join('')}</dl>`;
+}
+
+// ---- the URL remembers the view ------------------------------------------------------
+
+let rememberTimer = 0;
+function remember() {
+  clearTimeout(rememberTimer);
+  rememberTimer = setTimeout(() => {
+    const v = stage.globeView, q = new URLSearchParams();
+    q.set('p', state.projection);
+    q.set('c', `${v.lon.toFixed(1)},${v.lat.toFixed(1)},${v.dist.toFixed(2)}`);
+    q.set('s', state.surface || 'none'); q.set('f', state.flow || 'none'); q.set('l', state.lines || 'none');
+    if (state.events) q.set('e', state.events);
+    if (!state.live) q.set('t', new Date(state.time).toISOString().slice(0, 16) + 'Z');
+    if (state.pinned) q.set('at', `${state.pinned[0].toFixed(3)},${state.pinned[1].toFixed(3)}`);
+    if (state.lang !== 'en') q.set('lang', state.lang);
+    if (state.style !== 'relief') q.set('style', state.style);
+    history.replaceState(null, '', `#${q.toString()}`);
+  }, 400);
+}
+
+function restore() {
+  const q = new URLSearchParams(location.hash.slice(1));
+  if (q.get('p')) state.projection = q.get('p');
+  if (q.get('c')) {
+    const [lon, lat, dist] = q.get('c').split(',').map(Number);
+    if ([lon, lat, dist].every(Number.isFinite)) {
+      Object.assign(stage.globeView, { lon, lat, dist });
+      stage.updateCamera();
+    }
+  }
+  for (const [k, key] of [['s', 'surface'], ['f', 'flow'], ['l', 'lines'], ['e', 'events']]) if (q.get(k)) state[key] = q.get(k);
+  if (q.get('t')) { const t = Date.parse(q.get('t')); if (Number.isFinite(t)) { state.time = t; state.live = false; } }
+  if (q.get('at')) { const a = q.get('at').split(',').map(Number); if (a.every(Number.isFinite)) state.pinned = a; }
+  if (q.get('lang')) state.lang = q.get('lang');
+  if (q.get('style')) state.style = q.get('style');
+}
+
+// ---- the frame loop ------------------------------------------------------------------
+
+let lastFrame = performance.now(), lastLive = 0, lastCoverage = 0, lastRevision = -1;
+function loop(now) {
+  requestAnimationFrame(loop);
+  const dt = Math.min(100, now - lastFrame);
+  lastFrame = now;
+  if (state.live && now - lastLive > 20000) { lastLive = now; setTime(Date.now()); }
+  if (state.playing) {
+    const [a, b] = timeline.span;
+    let t = state.time + ((b - a) / 45000) * dt;
+    if (t > b) t = a;
+    setTime(t);
+  }
+  stage.coast();
+  if (flow.product) {
+    const cov = stage.coverage();
+    if (Math.abs(cov - lastCoverage) > 0.25 * Math.max(lastCoverage, 0.05)) { lastCoverage = cov; flow.reset(); }
+    flow.step();
+  }
+  // Names follow the camera, whatever moved it.
+  if (stage.revision !== lastRevision) { lastRevision = stage.revision; dirty.labels = true; }
+  if (dirty.labels) { dirty.labels = false; flow.viewChanged(); updateLabels(); }
+  const res = stage.resolution;
+  base.frame(res); flow.frame(res); lines.frame(res); events.frame(res);
+  stage.render();
+  if (dirty.legend) { dirty.legend = false; renderLegend($('legend'), legendData()); updateCredits(); }
+  if (dirty.place && now - lastPlace > (state.playing ? 400 : 120)) {
+    dirty.place = false; lastPlace = now;
+    renderPlace($('place'), placeCard());
+    if (hover) showTooltip();
+  }
+}
+
+start();

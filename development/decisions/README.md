@@ -24,6 +24,7 @@ Decisions that concern only one library are recorded in that library's own `deve
 | [0011](0011-first-application-celestial-atlas.md) | First application: Celestial Atlas, with provisional computation in JavaScript | Accepted |
 | [0012](0012-selectable-parameterised-datasets.md) | Selectable, parameterised datasets | Accepted |
 | [0013](0013-galaxies-and-their-relations.md) | Galaxies and their relations in the Celestial Atlas | Accepted |
+| [0014](0014-earth-atlas-separated-data-and-typed-layers.md) | The Earth Atlas: separated data and typed layers | Accepted, provisionally |
 
 ## 2. Template
 

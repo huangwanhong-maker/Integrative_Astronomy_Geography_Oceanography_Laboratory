@@ -1,0 +1,319 @@
+// Tests for the Earth Atlas's provisional computational core.
+// Run from the repository root:  node applications/geography/earth-atlas/tests/run-tests.mjs
+// The checks on real data need the products of data/products/ (see the README);
+// they are skipped, and say so, when a product is missing.
+
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { DEG, EARTH_RADIUS_M, toVector, fromVector, eastNorth, centralAngle, distanceM, move, wrapLongitude } from '../src/core/sphere.js';
+import { subsolarPoint, sunAltAz, gmst, julianDate, daylight, localMeanSolarTime } from '../src/core/sun.js';
+import { equalEarth, equirectangular, forward, inverse, extent, areaScale } from '../src/core/projections.js';
+import { gridPosition, bilinear, timeBracket, FieldProduct, areaMean } from '../src/core/grid.js';
+import { isolines, levels, extrema } from '../src/core/contour.js';
+import { fillRings, indexRaster, maskRaster, areaFraction, featureAreaFraction } from '../src/core/raster.js';
+import { ParticleSystem, uniformSpawn } from '../src/core/flow.js';
+import { windFromDirection, compassPoint, deepWaterGroupSpeed, waveEnergyVelocity, meanDirection } from '../src/core/derived.js';
+import { displayUnit, toShown, toStored, format } from '../src/core/units.js';
+import { joinCountries, valueForYear, latestWellCoveredYear } from '../src/core/join.js';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const root = resolve(here, '../../../..');
+const products = resolve(root, 'data/cache/products');
+
+let failures = 0, checks = 0;
+function check(name, value, limit, unit = '') {
+  checks++;
+  const ok = Number.isFinite(value) && Math.abs(value) <= limit;
+  if (!ok) failures++;
+  console.log(`${ok ? 'ok  ' : 'FAIL'}  ${name}: ${Number.isFinite(value) ? value.toExponential(3) : value} ${unit} (limit ${limit} ${unit})`);
+}
+function assert(name, condition, detail = '') {
+  checks++;
+  if (!condition) failures++;
+  console.log(`${condition ? 'ok  ' : 'FAIL'}  ${name}${detail ? `: ${detail}` : ''}`);
+}
+function seeded(seed) {
+  let s = seed >>> 0;
+  return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
+}
+const random = seeded(20261022);
+
+// ---- the sphere ------------------------------------------------------------
+{
+  let worst = 0;
+  for (let i = 0; i < 1000; i++) {
+    const lon = random() * 360 - 180, lat = Math.asin(2 * random() - 1) / DEG;
+    const [l2, p2] = fromVector(toVector(lon, lat));
+    worst = Math.max(worst, Math.abs(wrapLongitude(l2 - lon)) * Math.cos(lat * DEG), Math.abs(p2 - lat));
+  }
+  check('sphere: vector round trip', worst, 1e-10, 'deg');
+  const [e, n] = eastNorth(35, 40);
+  const p = toVector(35, 40);
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  check('sphere: east, north and up are orthonormal', Math.max(Math.abs(dot(e, n)), Math.abs(dot(e, p)), Math.abs(dot(n, p)), Math.abs(dot(e, e) - 1), Math.abs(dot(n, n) - 1)), 1e-12);
+  // One degree of a great circle is R pi / 180 = 111.195 km.
+  check('sphere: one degree of latitude', distanceM(10, 0, 10, 1) - (EARTH_RADIUS_M * Math.PI) / 180, 1e-6, 'm');
+  // Paris to Tokyo, 9 713 km on the sphere of mean radius (independently: 0.152 rad x R).
+  const angle = centralAngle(2.3522, 48.8566, 139.6917, 35.6895);
+  check('sphere: haversine equals the spherical law of cosines', angle - Math.acos(dot(toVector(2.3522, 48.8566), toVector(139.6917, 35.6895))), 1e-12, 'rad');
+  // Moving along the equator by a quarter of the circumference.
+  const q = move(0, 0, (Math.PI / 2) * EARTH_RADIUS_M, 0);
+  check('sphere: a quarter turn east along the equator', Math.hypot(q[0] - 90, q[1]), 1e-9, 'deg');
+  // Moving north through the pole comes down the opposite meridian.
+  const r = move(30, 89, 0, (2 * Math.PI / 180) * EARTH_RADIUS_M);
+  check('sphere: through the north pole', Math.hypot(wrapLongitude(r[0] - (-150)), r[1] - 89), 1e-9, 'deg');
+}
+
+// ---- the Sun ---------------------------------------------------------------
+{
+  const fixtures = JSON.parse(readFileSync(resolve(here, 'fixtures/subsolar.json'), 'utf8')).points;
+  let worstLon = 0, worstLat = 0, worstAngle = 0;
+  for (const f of fixtures) {
+    const ms = (f.jd_ut - 2440587.5) * 86400000;
+    const s = subsolarPoint(ms);
+    const dl = Math.abs(wrapLongitude(s.lon - f.lon_deg));
+    worstLon = Math.max(worstLon, dl);
+    worstLat = Math.max(worstLat, Math.abs(s.lat - f.lat_deg));
+    worstAngle = Math.max(worstAngle, centralAngle(s.lon, s.lat, f.lon_deg, f.lat_deg) / DEG);
+  }
+  check(`sun: subsolar longitude, ${fixtures.length} instants 1955-2045 (Horizons)`, worstLon, 0.03, 'deg');
+  check('sun: subsolar latitude (Horizons)', worstLat, 0.01, 'deg');
+  check('sun: subsolar point, great-circle error (Horizons)', worstAngle, 0.03, 'deg');
+  // Meeus example 12.a: 1987 April 10, 0h UT, GMST = 13h10m46.3668s.
+  check('sun: GMST, Meeus example 12.a', (gmst(2446895.5) - (13 + 10 / 60 + 46.3668 / 3600) * 15) * 3600, 0.01, 'arcsec');
+  check('sun: Julian date of the Unix epoch', julianDate(0) - 2440587.5, 0, 'd');
+  // At the subsolar point the Sun is at the zenith; 90 degrees away, on the horizon.
+  const sub = subsolarPoint(Date.UTC(2026, 9, 22, 6));
+  check('sun: altitude at the subsolar point', sunAltAz(sub.lon, sub.lat, sub).altitude - 90, 1e-6, 'deg');
+  const [e] = eastNorth(sub.lon, sub.lat);
+  const away = fromVector(e);
+  check('sun: altitude on the terminator', sunAltAz(away[0], away[1], sub).altitude, 1e-6, 'deg');
+  // Due south of the subsolar point the Sun stands due north.
+  const south = sunAltAz(sub.lon, sub.lat - 30, sub);
+  check('sun: azimuth seen from the south', Math.min(south.azimuth, 360 - south.azimuth), 1e-6, 'deg');
+  assert('sun: daylight classes', daylight(10) === 'day' && daylight(-3) === 'civil twilight' && daylight(-15) === 'astronomical twilight' && daylight(-30) === 'night');
+  check('sun: local mean solar time at 90 E at 06:00 UTC', localMeanSolarTime(Date.UTC(2026, 0, 1, 6), 90) - 12, 1e-9, 'h');
+}
+
+// ---- projections -----------------------------------------------------------
+{
+  for (const p of [equalEarth, equirectangular]) {
+    let worst = 0;
+    for (let i = 0; i < 2000; i++) {
+      const lon = random() * 359.9 - 179.95, lat = random() * 179.8 - 89.9, lambda0 = random() * 360 - 180;
+      const [x, y] = forward(p, lon, lat, lambda0);
+      const back = inverse(p, x, y, lambda0);
+      worst = Math.max(worst, Math.abs(wrapLongitude(back[0] - lon)) * Math.cos(lat * DEG), Math.abs(back[1] - lat));
+    }
+    check(`projection ${p.name}: forward then inverse`, worst, 1e-9, 'deg');
+  }
+  // Equal area: the Jacobian over cos(phi) is the same everywhere (Savric et al. 2018).
+  let lo = Infinity, hi = -Infinity;
+  for (let lat = -85; lat <= 85; lat += 5) for (let lon = -175; lon <= 175; lon += 35) {
+    const s = areaScale(equalEarth, lon, lat);
+    lo = Math.min(lo, s); hi = Math.max(hi, s);
+  }
+  check('projection Equal Earth: area scale constant within', (hi - lo) / lo, 1e-5);
+  // The paper gives the ratio of the axes as about 2.05 : 1.
+  const [xm, ym] = extent(equalEarth);
+  check('projection Equal Earth: ratio of the axes, 2.05', xm / ym - 2.05, 0.006);
+  check('projection Equal Earth: area of the map equals that of the sphere (4 pi)', areaScale(equalEarth, 0, 0) - 1, 1e-6);
+  assert('projection: a point beyond the outline has no place', inverse(equalEarth, xm * 0.99, ym * 0.99) === null);
+}
+
+// ---- grids -----------------------------------------------------------------
+{
+  // A linear function of longitude and latitude is reproduced exactly by bilinear interpolation.
+  const grid = { lon0: -180, dlon: 2, nlon: 180, lat0: 89, dlat: 2, nlat: 90, periodic: true };
+  const values = new Float32Array(grid.nlon * grid.nlat);
+  for (let r = 0; r < grid.nlat; r++) for (let c = 0; c < grid.nlon; c++) values[r * grid.nlon + c] = 3 * (grid.lat0 - r * grid.dlat) + 0.5 * c;
+  let worst = 0;
+  for (let i = 0; i < 500; i++) {
+    const lon = -180 + random() * 356, lat = -88 + random() * 176;
+    worst = Math.max(worst, Math.abs(bilinear(values, grid, lon, lat) - (3 * lat + 0.5 * ((lon + 180) / 2))));
+  }
+  check('grid: bilinear interpolation of a linear field', worst, 1e-3);
+  // Periodic: between the last column (178 E) and the first (180 W), halfway.
+  const wrap = bilinear(values, grid, 179, 1);
+  check('grid: interpolation across the antimeridian', wrap - (3 * 1 + 0.5 * (179 + 0) / 2), 1e-4);
+  const pos = gridPosition(grid, -181, 0);
+  check('grid: longitude wraps', pos[0] - 179.5, 1e-9);
+  // A missing corner: weights renormalised while they carry half the weight.
+  const g2 = { lon0: 0, dlon: 1, nlon: 2, lat0: 1, dlat: 1, nlat: 2, periodic: false };
+  const v2 = new Float32Array([1, NaN, 3, 5]);
+  check('grid: renormalised weights near a missing value', bilinear(v2, g2, 0.25, 0.25) - ((0.75 * 0.25 * 1 + 0.75 * 0.75 * 3 + 0.25 * 0.75 * 5) / (1 - 0.25 * 0.25)), 1e-6);
+  assert('grid: no value next to a missing value', Number.isNaN(bilinear(v2, g2, 0.9, 0.9)));
+  const times = [0, 3600e3, 7200e3];
+  const b = timeBracket(times, 5400e3);
+  assert('grid: time bracket', b.i0 === 1 && b.i1 === 2 && Math.abs(b.w - 0.5) < 1e-12);
+  const c = timeBracket(times, 9000e3);
+  assert('grid: time after the last is clamped, with its offset', c.i0 === 2 && c.offset === 1800e3);
+  assert('grid: nearest time for means', timeBracket(times, 2000e3, true).i0 === 1);
+  // Area mean of the field cos^0 = 1 is 1; of sin(lat) is 0.
+  const ones = new Float32Array(values.length).fill(1);
+  check('grid: area mean of a constant', areaMean(ones, grid) - 1, 1e-6);
+}
+
+// ---- contours --------------------------------------------------------------
+{
+  // The isoline of f = distance from (0, 0) is a circle (level chosen off the grid values).
+  const grid = { lon0: -5, dlon: 0.1, nlon: 101, lat0: 5, dlat: 0.1, nlat: 101, periodic: false };
+  const values = new Float32Array(grid.nlon * grid.nlat);
+  for (let r = 0; r < grid.nlat; r++) for (let c = 0; c < grid.nlon; c++) values[r * grid.nlon + c] = Math.hypot(grid.lon0 + c * grid.dlon, grid.lat0 - r * grid.dlat);
+  const R0 = 2.95;
+  const seg = isolines(values, grid, R0);
+  let worst = 0, length = 0;
+  for (let i = 0; i < seg.length; i += 4) {
+    worst = Math.max(worst, Math.abs(Math.hypot(seg[i], seg[i + 1]) - R0), Math.abs(Math.hypot(seg[i + 2], seg[i + 3]) - R0));
+    length += Math.hypot(seg[i + 2] - seg[i], seg[i + 3] - seg[i + 1]);
+  }
+  check('contour: points of the isoline lie on the level', worst, 2e-3, 'deg');
+  check('contour: length of the circle 2 pi r', length / (2 * Math.PI * R0) - 1, 1e-3);
+  // Every segment end is shared by exactly one other segment: the line is closed.
+  const ends = new Map();
+  for (let i = 0; i < seg.length; i += 2) {
+    const k = `${seg[i].toFixed(5)},${seg[i + 1].toFixed(5)}`;
+    ends.set(k, (ends.get(k) || 0) + 1);
+  }
+  assert('contour: the isoline is closed', [...ends.values()].every((n) => n === 2), `${ends.size} vertices`);
+  assert('contour: levels at multiples of a step', JSON.stringify(levels([3.2, 9.9], 2)) === '[4,6,8]');
+  // A single high and a single low.
+  const g = { lon0: -180, dlon: 2, nlon: 180, lat0: 89, dlat: 2, nlat: 90, periodic: true };
+  const p = new Float32Array(g.nlon * g.nlat);
+  for (let r = 0; r < g.nlat; r++) for (let c = 0; c < g.nlon; c++) {
+    const lon = g.lon0 + c * g.dlon, lat = g.lat0 - r * g.dlat;
+    p[r * g.nlon + c] = 101300 + 2000 * Math.exp(-((lon - 40) ** 2 + (lat - 45) ** 2) / 200) - 2500 * Math.exp(-((lon + 30) ** 2 + (lat + 51) ** 2) / 150);
+  }
+  const ex = extrema(p, g, { radius: 6, prominence: 300 });
+  const high = ex.find((e) => e.kind === 'high'), low = ex.find((e) => e.kind === 'low');
+  assert('contour: one high and one low found', ex.length === 2 && high && low, JSON.stringify(ex.map((e) => [e.kind, e.lon, e.lat])));
+  if (high && low) check('contour: positions of the high and the low', Math.hypot(high.lon - 40, high.lat - 45) + Math.hypot(low.lon + 30, low.lat + 51), 1e-9, 'deg');
+}
+
+// ---- rasters ---------------------------------------------------------------
+{
+  // A square 10 x 10 degrees with a 4 x 4 hole, on a 1-degree raster.
+  const coords = new Float32Array([0, 0, 10, 0, 10, 10, 0, 10, 0, 0, 3, 3, 3, 7, 7, 7, 7, 3, 3, 3]);
+  const target = new Uint8Array(360 * 180);
+  const n = fillRings(coords, [[0, 5], [5, 5]], 360, 180, 1, target);
+  assert('raster: a square with a hole fills 100 - 16 pixels', n === 84, `${n}`);
+  // Two squares sharing an edge claim each of its pixels once.
+  const two = indexRaster(new Float32Array([0, 0, 5, 0, 5, 5, 0, 5, 5, 0, 10, 0, 10, 5, 5, 5]), [{ rings: [[0, 4]] }, { rings: [[4, 4]] }], 360, 180);
+  const counts = [0, 0, 0];
+  two.forEach((v) => counts[v]++);
+  assert('raster: shared edges are not filled twice', counts[1] === 25 && counts[2] === 25, `${counts}`);
+}
+
+// ---- particles -------------------------------------------------------------
+{
+  // A uniform eastward flow of 10 m/s moves a particle on the equator by 10 dt metres.
+  const ps = new ParticleSystem(1, { minLife: 1000, maxLife: 1001, random: seeded(1) });
+  ps.reset(() => [0, 0]);
+  ps.lon[0] = 0; ps.lat[0] = 0; ps.age[0] = 0;
+  for (let i = 0; i < 100; i++) ps.step(() => [10, 0], 3600, () => [0, 0]);
+  check('flow: uniform flow along the equator, 100 h', ps.lon[0] - (10 * 3600 * 100) / EARTH_RADIUS_M / DEG, 1e-9, 'deg');
+  // Solid-body rotation about the pole: a particle keeps its latitude (the midpoint rule).
+  const omega = 1e-5;   // rad/s
+  const ring = new ParticleSystem(1, { minLife: 100000, maxLife: 100001, random: seeded(2) });
+  ring.reset(() => [0, 60]);
+  ring.lon[0] = 0; ring.lat[0] = 60; ring.age[0] = 0;
+  for (let i = 0; i < 2000; i++) ring.step((lon, lat) => [omega * EARTH_RADIUS_M * Math.cos(lat * DEG), 0], 600, () => [0, 60]);
+  check('flow: solid-body rotation keeps the latitude (2000 steps)', ring.lat[0] - 60, 0.05, 'deg');
+  // A particle dies where the field has no value.
+  const dead = new ParticleSystem(1, { random: seeded(3) });
+  dead.reset(() => [5, 5]);
+  dead.step(() => null, 60, () => [7, 7]);
+  assert('flow: rebirth where there is no flow', dead.alive[0] === 0 && dead.lon[0] === 7);
+  // Uniform spawning: the mean of sin(latitude) is near 0.
+  const spawn = uniformSpawn();
+  let s = 0;
+  const rnd = seeded(4);
+  for (let i = 0; i < 20000; i++) s += Math.sin(spawn(rnd)[1] * DEG);
+  check('flow: spawning uniform in area', s / 20000, 0.01);
+}
+
+// ---- derived quantities and units --------------------------------------------
+{
+  assert('derived: wind from the west is 270', Math.abs(windFromDirection(5, 0) - 270) < 1e-12);
+  assert('derived: wind from the north is 0', Math.abs(windFromDirection(0, -5)) < 1e-12);
+  assert('derived: compass points', compassPoint(225) === 'SW' && compassPoint(359) === 'N' && compassPoint(100) === 'E');
+  check('derived: deep-water group speed g T / 4 pi, T = 10 s', deepWaterGroupSpeed(10) - 7.80388, 1e-5, 'm/s');
+  const [u, v] = waveEnergyVelocity(270, 10);           // waves from the west travel east
+  check('derived: waves from the west travel east', Math.hypot(u - deepWaterGroupSpeed(10), v), 1e-12);
+  check('derived: mean of 350 and 10 degrees is 0', Math.min(meanDirection([350, 10]), 360 - meanDirection([350, 10])), 1e-9, 'deg');
+  const k = displayUnit('K');
+  check('units: 300 K in degrees Celsius', toShown(300, k) - 26.85, 1e-9);
+  check('units: back to kelvin', toStored(26.85, k) - 300, 1e-9);
+  check('units: 1e-3 kg m-2 s-1 is 3.6 mm/h', toShown(1e-3, displayUnit('kg m-2 s-1')) - 3.6, 1e-12);
+  check('units: 10 m/s in knots', toShown(10, displayUnit('m s-1', 'kn')) - 19.4384, 1e-4);
+  assert('units: numbers for reading', format(124516650) === '125 M' && format(3.14159) === '3.14' && format(1013.2) === '1013');
+}
+
+// ---- joins on the real products ------------------------------------------------
+{
+  const geo = resolve(products, 'geography-ne50m.json');
+  const ind = resolve(products, 'indicator-population.json');
+  if (existsSync(geo) && existsSync(ind)) {
+    const g = JSON.parse(readFileSync(geo, 'utf8'));
+    const p = JSON.parse(readFileSync(ind, 'utf8'));
+    const { codes, unmatched } = joinCountries(g.layers.countries, p.economies);
+    const matched = codes.filter(Boolean).length;
+    // Economies with no country of their own in Natural Earth at 1:50 million.
+    const expected = ['GIB'];
+    assert(`join: ${matched} of ${codes.length} countries carry a World Bank economy`, matched >= 200);
+    assert('join: the unmatched economies are the expected ones', JSON.stringify(unmatched) === JSON.stringify(expected), unmatched.join(' '));
+    const kosovo = codes[g.layers.countries.findIndex((c) => c.id === 'KOS')];
+    assert('join: Kosovo by its ISO alpha-2 code (XK)', kosovo === 'XKX', String(kosovo));
+    const france = codes[g.layers.countries.findIndex((c) => c.id === 'FRA')];
+    assert('join: France, whose ISO_A3 is -99 in Natural Earth', france === 'FRA', String(france));
+    const r = valueForYear(p.economies.JPN, p.years, 2030, 10);
+    assert('join: value for a later year falls back to the latest', r && r.year === p.years[p.years.length - 1]);
+    assert('join: a well-covered year exists', latestWellCoveredYear(p.economies, p.years) >= 2020);
+  } else {
+    console.log('skip  join: products missing (geography-ne50m, indicator-population)');
+  }
+}
+
+// ---- the land fraction from the geography product -------------------------------
+{
+  const geo = resolve(products, 'geography-ne50m.json');
+  if (existsSync(geo)) {
+    const g = JSON.parse(readFileSync(geo, 'utf8'));
+    const bin = readFileSync(resolve(products, g.coordinates.file));
+    const coords = new Float32Array(bin.buffer, bin.byteOffset, bin.byteLength / 4);
+    const W = 2048, H = 1024;
+    const land = maskRaster(coords, g.layers.land, W, H);
+    const rastered = areaFraction(land, W, H, (v) => v === 1);
+    const exact = g.layers.land.reduce((s, f) => s + featureAreaFraction(coords, f.rings), 0);
+    check('raster: land area from the raster equals that of the polygons', rastered - exact, 5e-4);
+    // The land of the Earth is 29.2 % of its surface (148.9 of 510.1 million km^2, with
+    // Antarctica's ice shelves, which Natural Earth's land omits: about 0.3 %).
+    check('raster: Natural Earth land is 28.9 +/- 0.3 % of the sphere', exact - 0.289, 0.003);
+  }
+}
+
+// ---- a field product -------------------------------------------------------------
+{
+  const meta = resolve(products, 'fields-gfs-forecast.json');
+  if (existsSync(meta)) {
+    const m = JSON.parse(readFileSync(meta, 'utf8'));
+    const bin = readFileSync(resolve(products, m.file));
+    const f = new FieldProduct(m, bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength));
+    const t = f.slice('tmp2m', 0);
+    const mean = areaMean(t, f.grid) - 273.15;
+    // The global mean near-surface temperature is about 14-16 degrees C.
+    assert('field: GFS global mean 2 m temperature is plausible', mean > 10 && mean < 19, `${mean.toFixed(2)} °C`);
+    const p = f.slice('prmslmsl', 0);
+    const pm = areaMean(p, f.grid) / 100;
+    assert('field: GFS mean sea-level pressure is plausible', pm > 1005 && pm < 1015, `${pm.toFixed(1)} hPa`);
+    const v = m.variables.find((x) => x.name === 'tmp2m');
+    check('field: quantisation error at most half a step', v.scale / 2 - (v.max - v.min) / 130000, 1e-9);
+  } else {
+    console.log('skip  field: fields-gfs-forecast missing');
+  }
+}
+
+console.log(`\n${checks - failures} of ${checks} checks passed.`);
+process.exit(failures ? 1 : 0);

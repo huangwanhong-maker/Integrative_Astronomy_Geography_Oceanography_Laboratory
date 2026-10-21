@@ -1,6 +1,6 @@
 # applications: Laboratories and Tools
 
-*Status: planned.* This directory is an edge at the top of the architecture. It may depend on everything, and nothing depends on it.
+*Status: draft.* This directory is an edge at the top of the architecture. It may depend on everything, and nothing depends on it.
 
 ## 1. Purpose
 
@@ -23,7 +23,7 @@ Applications are complete programs that people use. They come in two kinds:
 | Directory | Planned applications |
 |---|---|
 | [`astronomy/`](astronomy/) | **Celestial Atlas (tool, working)**; orbital sandbox (lab); ephemeris calculator (tool) |
-| [`geography/`](geography/) | Projection lab, terrain and watershed lab, remote-sensing lab (labs); globe viewer and land-use atlas (tools) |
+| [`geography/`](geography/) | **Earth Atlas (tool, working)**; projection lab, terrain and watershed lab, remote-sensing lab (labs); land-use atlas (tool) |
 | [`oceanography/`](oceanography/) | Rotating tank (lab); ocean-profile explorer (tool) |
 | [`meteorology/`](meteorology/) | Weather-map lab and atmospheric-sounding lab (labs) |
 | [`geodesy/`](geodesy/) | Foucault pendulum (lab) |

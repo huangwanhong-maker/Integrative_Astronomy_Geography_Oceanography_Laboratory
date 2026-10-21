@@ -245,7 +245,7 @@ Each module directory contains:
 
 - Record decisions that shape structure, conventions or tooling in `development/decisions/NNNN-slug.md`, using the template in the index.
 - Never rewrite a record. A new record supersedes or amends it, and the old record's status is updated to point to the new one.
-- Records accepted so far: 0001–0013.
+- Records accepted so far: 0001–0014.
 
 ### 6.4 Change Discipline
 
@@ -282,9 +282,11 @@ Each module directory contains:
   - Load three.js from jsDelivr, pinned to an exact version (0.170.0).
   - Serve locally with Python's standard library.
   - Test with Node (v22 is installed).
-  - Check visually by driving headless Chrome over the DevTools protocol.
+  - Check visually by driving headless Chrome over the DevTools protocol. Chrome must be given an absolute `--user-data-dir`; with a relative one it exits at once.
+  - Each application has its own local server: the Celestial Atlas on port 8770, the Earth Atlas on 8790.
 - **Visual style:**
   - The Celestial Atlas uses Dusty Orchid (#CA8DBE) as its main colour, chosen by the user: plum nights, orchid accents and orchid-tinted paper for charts.
+  - The Earth Atlas shares that palette for now (ADR 0014), with data in perceptually uniform colour maps (cmocean, and the laboratory's orchid map); the user may give it a colour of its own.
   - All interfaces use serif type (Source Serif 4).
   - Each application may carry its own main colour within the warm, gentle family the user prefers.
 - **Version control.**
@@ -316,7 +318,7 @@ Each module directory contains:
 
 As of 2026-10-22:
 
-- The architecture and decision records 0001–0013 are written.
+- The architecture and decision records 0001–0014 are written.
 - The layered directory structure is in place, with READMEs.
 - The three libraries are scaffolded as their own git repositories and attached under `lib/`.
 - All four repositories are published on GitHub.
@@ -329,10 +331,16 @@ As of 2026-10-22:
     - orbits.
   - It shows any instant from 1849 to 2150, or live.
   - Its computation is provisional JavaScript, tested against JPL Horizons, Meeus, Tully (2015) and Karachentsev et al. (2013): 47 checks, run with `node applications/astronomy/celestial-atlas/tests/run-tests.mjs`.
-- `data/` is a general data library ([ADR 0012](development/decisions/0012-selectable-parameterised-datasets.md)):
-  - Manifests choose which data and how much: fixed files, or TAP catalogue queries with parameters and profiles.
-  - The TAP client serves ESA Gaia, CDS VizieR and SIMBAD.
-  - Products are listed in an index that applications read.
+- The second application, `applications/geography/earth-atlas`, works ([ADR 0014](development/decisions/0014-earth-atlas-separated-data-and-typed-layers.md)).
+  - It shows the Earth's atmosphere, ocean, land and people on a globe or on equal-area and equirectangular maps, at one instant.
+  - Its data are separate products, joined only in the application: a base map without thematic values, gridded fields, country indicators and events.
+  - Its layers are typed by the shape of their data (surface, flow, lines, events, base), so new data appear without changes to code.
+  - Its provisional JavaScript core is tested against JPL Horizons, Meeus, the Equal Earth paper and the real products: 65 checks, run with `node applications/geography/earth-atlas/tests/run-tests.mjs`.
+- `data/` is a general data library ([ADR 0012](development/decisions/0012-selectable-parameterised-datasets.md), [ADR 0014](development/decisions/0014-earth-atlas-separated-data-and-typed-layers.md)):
+  - Manifests choose which data and how much: fixed files, TAP catalogue queries, ERDDAP grid subsets, or web requests, with parameters (including relative times) and profiles.
+  - The TAP client serves ESA Gaia, CDS VizieR and SIMBAD. The ERDDAP client serves NOAA's forecasts, analyses and relief. The World Bank and the USGS are reached by web requests.
+  - `data/formats/netcdf3.py` reads netCDF classic files with the standard library.
+  - Products are of six kinds (stars, galaxies, geography, fields, indicators, events), listed in an index that applications read.
 - There is no C++ code yet.
 
 The next step is roadmap Phase 0.
