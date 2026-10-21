@@ -22,7 +22,7 @@ Applications are complete programs that people use. They come in two kinds:
 
 | Directory | Planned applications |
 |---|---|
-| [`astronomy/`](astronomy/) | Orbital sandbox (lab); ephemeris calculator and planetarium (tools) |
+| [`astronomy/`](astronomy/) | **Celestial Atlas (tool, working)**; orbital sandbox (lab); ephemeris calculator (tool) |
 | [`geography/`](geography/) | Projection lab, terrain and watershed lab, remote-sensing lab (labs); globe viewer and land-use atlas (tools) |
 | [`oceanography/`](oceanography/) | Rotating tank (lab); ocean-profile explorer (tool) |
 | [`meteorology/`](meteorology/) | Weather-map lab and atmospheric-sounding lab (labs) |

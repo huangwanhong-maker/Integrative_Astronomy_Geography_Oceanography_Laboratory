@@ -2,6 +2,16 @@
 
 *Status: draft, 2026-10-21.* The phases are ordered intentions, not commitments. Revise them as the work teaches us.
 
+## Progress
+
+**2026-10-22. The first application, ahead of Phase 1.** At the user's request, the Celestial Atlas was built before Phase 0 ([ADR 0011](decisions/0011-first-application-celestial-atlas.md)).
+- It already covers Phase 1 steps 1–3 in provisional JavaScript:
+  - time scales;
+  - reference frames;
+  - the evaluator for the JPL DE format and the registry entry for DE440.
+- It validates them against JPL Horizons.
+- When the C++ core is built, it takes over this work and must pass the same tests.
+
 ## Phase 0. Foundations
 
 - **Repositories.** Done (2026-10-22). All four repositories are published on GitHub.

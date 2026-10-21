@@ -21,6 +21,7 @@ Decisions that concern only one library are recorded in that library's own `deve
 | [0008](0008-independent-libraries.md) | Independent libraries in separate repositories | Accepted |
 | [0009](0009-development-folder.md) | A development folder for process material | Accepted |
 | [0010](0010-domain-organised-fields-and-applications.md) | Domain-organised fields and applications | Accepted |
+| [0011](0011-first-application-celestial-atlas.md) | First application: Celestial Atlas, with provisional computation in JavaScript | Accepted |
 
 ## 2. Template
 

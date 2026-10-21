@@ -245,7 +245,7 @@ Each module directory contains:
 
 - Record decisions that shape structure, conventions or tooling in `development/decisions/NNNN-slug.md`, using the template in the index.
 - Never rewrite a record. A new record supersedes or amends it, and the old record's status is updated to point to the new one.
-- Records accepted so far: 0001–0010.
+- Records accepted so far: 0001–0011.
 
 ### 6.4 Change Discipline
 
@@ -277,6 +277,13 @@ Each module directory contains:
 
 - **Decided** ([ADR 0003](development/decisions/0003-cpp-computational-core.md)): C++ for computational code, in the libraries and in `core/`, wherever possible. Python or another suitable language for data acquisition, orchestration, notebooks, machine learning and visualization.
 - **Provisional** (to be confirmed in roadmap Phase 0): C++20, CMake, nanobind for Python bindings, a C++ test framework, pytest, and Python 3.12 or later.
+- **Web applications:**
+  - Use ES modules without a build step.
+  - Load three.js from jsDelivr, pinned to an exact version (0.170.0).
+  - Serve locally with Python's standard library.
+  - Test with Node (v22 is installed).
+  - Check visually by driving headless Chrome over the DevTools protocol.
+- **Visual style:** a pink palette: rose-plum nights, rose and blush accents, blush paper for charts, and serif type (Source Serif 4).
 - **Version control.**
   - The laboratory's remote is `https://github.com/huangwanhong-maker/Integrative_Astronomy_Geography_Oceanography_Laboratory`.
   - The libraries' remotes are `https://github.com/huangwanhong-maker/{calx,morphe,physis}`.
@@ -306,10 +313,17 @@ Each module directory contains:
 
 As of 2026-10-22:
 
-- The architecture and decision records 0001–0010 are written.
+- The architecture and decision records 0001–0011 are written.
 - The layered directory structure is in place, with READMEs.
 - The three libraries are scaffolded as their own git repositories and attached under `lib/`.
 - All four repositories are published on GitHub.
-- There is no code yet.
+- The first application, `applications/astronomy/celestial-atlas`, works ([ADR 0011](development/decisions/0011-first-application-celestial-atlas.md)).
+  - It is a web application with four views over DE440 and the HYG star catalogue, at any instant or live.
+  - Its computation is provisional JavaScript, tested against JPL Horizons. Run the tests with `node applications/astronomy/celestial-atlas/tests/run-tests.mjs`.
+- `data/` has working parts:
+  - registry manifests for three datasets;
+  - `acquisition/fetch.py`;
+  - `products/star_catalog.py`.
+- There is no C++ code yet.
 
 The next step is roadmap Phase 0.
