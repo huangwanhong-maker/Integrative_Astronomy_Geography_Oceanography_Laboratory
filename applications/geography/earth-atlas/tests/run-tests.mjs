@@ -21,6 +21,7 @@ import { gaussLegendre, SphericalHarmonics, EARTH_RADIUS as RADIUS, OMEGA } from
 import { BarotropicModel, GRAVITY } from '../src/core/barotropic.js';
 import { ShallowWaterModel, lanczosWeights } from '../src/core/shallowwater.js';
 import { FFT } from '../src/core/spectral.js';
+import { detect, stitch, arcDeg, positionAt } from '../src/core/cyclones.js';
 import { koppen, koppenQuantities, koppenGrid, KOPPEN_CODES, dryMonths, meanTemperature } from '../src/core/climate.js';
 import { ClassRaster } from '../src/core/grid.js';
 import { precipitationScale, climateDiagram } from '../src/ui/climate.js';
@@ -512,6 +513,51 @@ const random = seeded(20261022);
     assert('digital filter: a gravity wave of 1.7 h is removed, one of 46 h kept', Math.abs(a) < 0.01 && b > 0.98, `amplitudes ${a.toFixed(4)} and ${b.toFixed(4)}`);
     check('digital filter: its weights sum to one', lanczosWeights(12, 0.26).reduce((x, y) => x + y, 0) - 1, 1e-14);
   }
+}
+
+// ---- tropical cyclones -----------------------------------------------------------------
+{
+  // A 1 degree global grid of sea-level pressure: 1013 hPa, with Gaussian lows
+  // p = 1013 hPa - depth exp(-(r / 2.5 deg)^2) and, optionally, a long trough.
+  const grid = { lon0: -180, dlon: 1, nlon: 360, lat0: 90, dlat: 1, nlat: 181, periodic: true };
+  const field = (lows, trough = false) => {
+    const v = new Float32Array(grid.nlon * grid.nlat);
+    for (let r = 0; r < grid.nlat; r++) {
+      const lat = 90 - r;
+      for (let c = 0; c < grid.nlon; c++) {
+        const lon = -180 + c;
+        let p = 101300;
+        for (const [lo, la, depth] of lows) p -= depth * Math.exp(-((arcDeg(lon, lat, lo, la) / 2.5) ** 2));
+        // A trough along 40 S: low along a line, open at its ends.
+        if (trough) p -= 900 * Math.exp(-(((lat + 40) / 3) ** 2));
+        v[r * grid.nlon + c] = p;
+      }
+    }
+    return v;
+  };
+  const found = detect(field([[130.4, 18.3, 8000]]), grid);
+  const f0 = found[0] || { lon: NaN, lat: NaN, pa: NaN };
+  // The paraboloid fit places the centre between grid points.
+  check('cyclones: a low of 933 hPa is found where it is, within 0.15 degrees', arcDeg(f0.lon, f0.lat, 130.4, 18.3), 0.15, 'deg');
+  check('cyclones: and its central pressure within 3 hPa', Math.abs(f0.pa - 93300) / 100, 3, 'hPa');
+  assert('cyclones: one candidate, not several, for one low', found.length === 1, `${found.length}`);
+  const trough = detect(field([], true), grid);
+  assert('cyclones: a trough without a closed contour is not a cyclone', trough.length === 0, `${trough.length} candidates`);
+  // A cyclone moving 3 degrees in 6 hours for two days, and a shallow, short-lived low.
+  const times = [...Array(9).keys()].map((k) => Date.UTC(2026, 9, 20, 6 * k));
+  const nodes = times.map((_, k) => detect(field([[150 - 3 * k, 12 + 0.8 * k, 4000 + 300 * k], ...(k < 3 ? [[-40, 20, 300]] : [])]), grid));
+  const tracks = stitch(times, nodes);
+  assert('cyclones: a moving cyclone becomes one track of 9 positions', tracks.length === 1 && tracks[0].points.length === 9,
+    tracks.map((t) => t.points.length).join(', '));
+  const born = stitch(times, times.map((_, k) => detect(field([[150, 35, 5000 + 100 * k]]), grid)));
+  assert('cyclones: a low born at 35 degrees is not tropical', born.length === 0);
+  const shallow = stitch(times, times.map((_, k) => detect(field([[150, 15, 800]]), grid)));
+  assert('cyclones: a low that never deepens to 1000 hPa is left out', shallow.length === 0);
+  const sea = stitch(times, nodes, { isOcean: (lon) => lon < 140 });
+  assert('cyclones: and one born over land, when a land-sea test is given', sea.length === 0);
+  // Positions between the stored times, across the date line.
+  const q = positionAt([{ t: 0, lon: 179, lat: 10, pa: 100000 }, { t: 6, lon: -179, lat: 12, pa: 99000 }], 3);
+  check('cyclones: positions interpolate across the date line', Math.abs(Math.abs(q.lon) - 180) + Math.abs(q.lat - 11) + Math.abs(q.pa - 99500) / 100, 1e-9);
 }
 
 // ---- water in shaded relief ---------------------------------------------------------

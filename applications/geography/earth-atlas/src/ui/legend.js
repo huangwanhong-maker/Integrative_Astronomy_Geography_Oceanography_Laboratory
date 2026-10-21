@@ -2,7 +2,7 @@
 // units, from which source, and at which time.
 
 import { format } from '../core/units.js';
-import { DEPTH_CLASSES, radiusOf } from '../layers/events.js';
+import { DEPTH_CLASSES, radiusOf, ALERTS } from '../layers/events.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -11,7 +11,7 @@ function tickText(v) {
   return Number.isInteger(v) ? String(v) : format(v, 2);
 }
 
-export function renderLegend(el, { surface, flow, lines, events }) {
+export function renderLegend(el, { surface, flow, lines, events, tracks }) {
   const parts = [];
   if (surface && surface.kind === 'classes') {
     // One column per main class (A tropical, B arid, C temperate, D cold, E polar).
@@ -44,7 +44,22 @@ export function renderLegend(el, { surface, flow, lines, events }) {
     if (lines) rows.push(`<div class="title"><span>${esc(lines.title)}</span><span class="unit">${esc(lines.unit)}</span></div>${lines.note ? `<div class="note">${esc(lines.note)}</div>` : ''}`);
     parts.push(`<div>${rows.join('<div style="height:6px"></div>')}</div>`);
   }
-  if (events) {
+  if (tracks) {
+    const keys = tracks.keys.map((k) => `<span><i class="line${k.dashed ? ' dashed' : ''}" style="--c:${k.colour}"></i>${esc(k.label)}</span>`).join('');
+    parts.push(`<div>
+      <div class="title"><span>${esc(tracks.title)}</span><span class="unit">${esc(tracks.count)}</span></div>
+      <div class="keys">${keys}</div>
+      ${tracks.note ? `<div class="note">${esc(tracks.note)}</div>` : ''}
+    </div>`);
+  }
+  if (events && events.kind === 'disaster') {
+    const keys = Object.entries(ALERTS).map(([k, c]) => `<span><i style="background:rgb(${c.join(',')})"></i>${esc(k)}</span>`).join('');
+    parts.push(`<div>
+      <div class="title"><span>${esc(events.title)}</span><span class="unit">${esc(events.count)}</span></div>
+      <div class="keys">${keys}</div>
+      ${events.note ? `<div class="note">${esc(events.note)}</div>` : ''}
+    </div>`);
+  } else if (events) {
     const keys = DEPTH_CLASSES.map((c) => `<span><i style="background:rgb(${c.colour.join(',')})"></i>${esc(c.label)}</span>`).join('');
     const sizes = [5, 6, 7].map((m) => {
       const r = radiusOf(m);

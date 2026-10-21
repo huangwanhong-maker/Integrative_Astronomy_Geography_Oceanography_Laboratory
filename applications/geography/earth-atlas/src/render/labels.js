@@ -26,7 +26,7 @@ export class Labels {
     return w;
   }
 
-  // items: [{ key, text, html, lon, lat, className, font, size, anchor: 'centre' | 'right', always, spacing }]
+  // items: [{ key, text, html, lon, lat, className, font, size, anchor: 'centre' | 'right', always, spacing, colour }]
   // (text is measured; html, if given, is shown instead)
   // screen(lon, lat) -> [x, y, visibility 0..1] in CSS pixels, or null.
   update(items, screen, width, height) {
@@ -56,6 +56,7 @@ export class Labels {
       if (el._text !== content) { if (item.html) el.innerHTML = item.html; else el.textContent = item.text; el._text = content; }
       const cls = `label ${item.className}${item.anchor === 'right' ? ' right' : ''}${item.upper ? ' upper' : ''}`;
       if (el.className !== cls) el.className = cls;
+      if ((el.style.color || undefined) !== item.colour) el.style.color = item.colour || '';
       el.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
       el.style.opacity = vis < 1 ? vis.toFixed(2) : '';
       el.hidden = false;

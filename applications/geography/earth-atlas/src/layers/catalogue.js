@@ -6,7 +6,9 @@
 //            a class per cell (climate classes, by period and scenario);
 //   flow     a vector field shown by moving particles;
 //   lines    isolines of a field, with its highs and lows;
-//   events   things that happened at places and instants.
+//   events   things that happened at places and instants;
+//   tracks   tropical cyclones: found here in each model's sea-level pressure,
+//            or observed and forecast officially (a tracks product).
 // A field variable is recognised by its CF standard name and its level, so
 // that any product carrying, say, geopotential height at 500 hPa offers the
 // same layer, drawn the same way. Products of different models for the same
@@ -86,7 +88,8 @@ export const DOMAINS = {
 };
 
 // Models in the order they are offered.
-const MODEL_ORDER = ['GFS', 'AIGFS', 'AIGEFS mean', 'Shallow water (laboratory)', 'Barotropic (laboratory)'];
+const MODEL_ORDER = ['GFS', 'AIGFS', 'AIGEFS mean', 'Pangu-Weather (laboratory)', 'Pangu-Weather hindcast (laboratory)',
+  'Shallow water (laboratory)', 'Barotropic (laboratory)'];
 export const modelRank = (m) => { const i = MODEL_ORDER.indexOf(m); return i < 0 ? MODEL_ORDER.length : i; };
 
 const isDirection = (v) => /direction/.test(v.standard_name || '') || v.units === 'degree';
@@ -126,7 +129,7 @@ function classSurfaces(library) {
 }
 
 export function buildCatalogue(library) {
-  const surfaces = [], flows = [], lines = [], events = [], probes = [], clouds = [], normals = [];
+  const surfaces = [], flows = [], lines = [], events = [], probes = [], clouds = [], normals = [], tracks = [];
   surfaces.push(...classSurfaces(library));
   for (const [name, meta] of library.fieldMeta) {
     const domain = meta.domain || 'geography';
@@ -190,6 +193,9 @@ export function buildCatalogue(library) {
       surfaces.push({ id: `${qid}${slug(level)}${spread ? '-spread' : ''}@${name}`, key: `${qid}|${level}|${spread ? 'spread' : ''}`, kind: 'field', label, model: shownModel, product: name, variables: [v.name], domain, units: v.units, level, style, source: source(meta), percent: known && known.percent, spread });
       if (spread) continue;
       if (v.standard_name === 'air_pressure_at_sea_level') {
+        if (meta.times && meta.times.length > 4) {
+          tracks.push({ id: `cyclones@${name}`, kind: 'model', label: `Found in ${shownModel}`, model: shownModel, product: name, variable: v.name });
+        }
         lines.push({ id: `isobars@${name}`, key: 'isobars|', label: 'Isobars', model: shownModel, product: name, variable: v.name, step: 400, base: 101300, extrema: { radius: 10, prominence: 500, polarRows: 8 }, units: v.units, labelUnits: 'hPa' });
       }
       if (v.standard_name === 'air_temperature') {
@@ -206,6 +212,9 @@ export function buildCatalogue(library) {
     surfaces.push({ id: `indicator:${e.name}`, key: `indicator:${e.name}`, kind: 'indicator', label, product: e.name, code: e.code, domain: e.domain || 'geography',
       units: unit, title: e.title, style: { colormap: 'matter', reverse: true, clip: [0.04, 0.96] }, source: e.source });
   }
+  for (const e of library.list('tracks')) {
+    tracks.push({ id: `tracks:${e.name}`, kind: 'official', label: 'Observed and official forecast', model: (e.source && e.source.credit) || e.title, product: e.name, source: e.source });
+  }
   for (const e of library.list('events')) {
     events.push({ id: e.name, label: e.title, kind: e.kind, product: e.name, count: e.count, window: e.window, domain: e.domain });
   }
@@ -218,7 +227,8 @@ export function buildCatalogue(library) {
   flows.sort((a, b) => flowRank(a) - flowRank(b) || modelRank(a.model) - modelRank(b.model));
   lines.sort((a, b) => a.key.localeCompare(b.key) || modelRank(a.model) - modelRank(b.model));
   clouds.sort((a, b) => modelRank(a.model) - modelRank(b.model));
-  return { surfaces, flows, lines, events, probes, clouds, normals };
+  tracks.sort((a, b) => (a.kind === 'official' ? -1 : 0) - (b.kind === 'official' ? -1 : 0) || modelRank(a.model) - modelRank(b.model));
+  return { surfaces, flows, lines, events, probes, clouds, normals, tracks };
 }
 
 // Definitions grouped by key, in catalogue order: [[key, [defs by model]]].

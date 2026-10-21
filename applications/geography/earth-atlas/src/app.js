@@ -15,6 +15,7 @@ import { SurfaceLayer } from './layers/surface.js';
 import { FlowLayer } from './layers/flow.js';
 import { LinesLayer } from './layers/lines.js';
 import { EventsLayer } from './layers/events.js';
+import { TracksLayer } from './layers/tracks.js';
 import { ImageryLayer, DetailLayer } from './layers/imagery.js';
 import { LabModel, modelInputs, LAB_MODELS } from './layers/labmodel.js';
 import { setClouds } from './render/surface.js';
@@ -37,7 +38,7 @@ const HOUR = 3600000, DAY = 86400000;
 
 const state = {
   projection: 'globe',
-  surface: null, compare: null, flow: null, lines: 'none', events: null, indicator: null,
+  surface: null, compare: null, flow: null, lines: 'none', events: null, indicator: null, tracks: [],
   style: 'relief', night: true, lights: true, clouds: false,
   coast: true, borders: true, rivers: true, graticule: false, labels: true, reliefOnData: true,
   lang: 'en',
@@ -45,7 +46,7 @@ const state = {
   pinned: null,
 };
 
-let library, catalogue, stage, base, surface, flow, lines, events, labels, timeline, geography, elevation;
+let library, catalogue, stage, base, surface, flow, lines, events, labels, timeline, geography, elevation, tracks;
 let imagery, detail, labModel, detailSource = null;
 const lab = { input: null, running: null, progress: 0, runs: {}, start: null, against: '', error: '' };
 const MODEL_COLOURS = ['#CA8DBE', '#f6c47e', '#9fb6e8', '#8fd1b4', '#e8a0a0'];
@@ -115,12 +116,13 @@ async function start() {
   flow = new FlowLayer(stage, library);
   lines = new LinesLayer(stage, library);
   events = new EventsLayer(stage, library);
+  tracks = new TracksLayer(stage, library);
   labels = new Labels($('labels'));
 
   progress(0.5, 'Reading the forecast…');
   await Promise.all([
     selectSurface(state.surface, false), selectFlow(state.flow, false),
-    selectLines(state.lines, false), selectEvents(state.events, false),
+    selectLines(state.lines, false), selectEvents(state.events, false), selectTracks(state.tracks, false),
   ]);
   await painting;
   progress(0.95);
@@ -199,6 +201,7 @@ function chooseDefaults() {
   }
   if (state.lines !== 'none' && !ids(catalogue.lines).includes(state.lines)) state.lines = 'none';
   if (state.events && !ids(catalogue.events).includes(state.events)) state.events = null;
+  state.tracks = state.tracks.filter((id) => ids(catalogue.tracks).includes(id));
   const first = catalogue.surfaces.find((s) => s.kind === 'indicator');
   if (!state.indicator && first) state.indicator = first.id;
 }
@@ -241,6 +244,21 @@ async function selectLines(id, render = true) {
   afterChange(render);
 }
 
+// The colour of a model, the same in the place card, the panel and the tracks.
+const modelColour = (model) => MODEL_COLOURS[modelRank(model) % MODEL_COLOURS.length];
+
+// Cyclone tracks of the chosen sources; genesis over the sea is judged by the relief.
+async function selectTracks(list, render = true) {
+  state.tracks = list;
+  const name = elevation && elevation.meta.variables[0].name;
+  const isOcean = elevation ? (lon, lat) => elevation.sample(name, 0, lon, lat) < 0 : null;
+  const defs = list.map((id) => find(catalogue.tracks, id)).filter(Boolean)
+    .map((d) => ({ ...d, colour: modelColour(d.model) }));
+  await tracks.select(defs, isOcean);
+  tracks.update(state.time, true);
+  afterChange(render);
+}
+
 async function selectEvents(id, render = true) {
   state.events = id;
   await events.select(find(catalogue.events, id));
@@ -262,6 +280,11 @@ function renderPanel() {
     lights: Boolean(imagery && imagery.entry('night-lights')),
     clouds: catalogue.clouds.length > 0,
     lab: lab.input ? lab : null,
+    modelColour,
+    ai: [...library.fieldMeta.values()].filter((m) => m.verification && m.verification.start).map((m) => ({
+      label: m.model, short: m.model.replace(/ \(laboratory\)$/, '').replace(/ hindcast$/, ''),
+      start: Date.parse(m.verification.start), leads: m.verification.leads,
+    })),
   };
   buildPanel($('layers'), catalogue, state, years, extra, {
     surface: (id) => selectSurface(id),
@@ -270,6 +293,7 @@ function renderPanel() {
     flow: (id) => selectFlow(id),
     lines: (id) => selectLines(id),
     events: (id) => selectEvents(id),
+    track: (id, on) => selectTracks(on ? [...state.tracks, id] : state.tracks.filter((x) => x !== id)),
     year: (step) => {
       const p = surface.product;
       if (!p || !p.years) return;
@@ -319,6 +343,8 @@ function setProjection(mode, initial = false) {
   if (flow.product) flow.reset();
   lines.update(state.time, true);
   events.update(state.time, true);
+  tracks.rebuild();
+  tracks.update(state.time, true);
   dirty.labels = true;
   remember();
 }
@@ -337,6 +363,7 @@ function timeDomain() {
   add(flow.product);
   add(lines.product);
   if (events.product) domains.push(events.window());
+  if (tracks.sources.length && tracks.window()) domains.push(tracks.window());
   const now = Date.now();
   if (!domains.length) return { span: [now - DAY, now + DAY], steps: [], coverage: [] };
   const t0 = Math.min(...domains.map((d) => d[0])), t1 = Math.max(...domains.map((d) => d[1]));
@@ -361,6 +388,7 @@ function setTime(t) {
   flow.update(t);
   lines.update(t);
   events.update(t);
+  tracks.update(t);
   const sub = subsolarPoint(t);
   stage.material.uniforms.uSun.value.fromArray(toVector(sub.lon, sub.lat));
   timeline && timeline.set({ time: t, now: Date.now() });
@@ -450,7 +478,9 @@ function showTooltip() {
   if (!hover) { tip.hidden = true; return; }
   const quake = events.product ? events.pick(hover.x, hover.y) : null;
   let html;
-  if (quake) {
+  if (quake && events.product.kind === 'disaster') {
+    html = `<span class="v">${esc(quake.name || '')}</span> · ${esc(quake.alert || '')}<br><span class="n">${esc(quake.severity || events.product.types[quake.type] || '')}</span><br>${formatShortUTC(quake.time_ms)}`;
+  } else if (quake) {
     html = `<span class="v">M ${quake.mag.toFixed(1)}</span> · ${format(quake.depth_km)} km deep<br><span class="n">${esc(quake.place || '')}</span><br>${formatShortUTC(quake.time_ms)}`;
   } else {
     const name = placeName(hover.lon, hover.lat).name;
@@ -563,7 +593,11 @@ function placeCard() {
       const r = w && valueForYear(w, surface.product.years, surface.year, 0);
       if (r) rows.push([`World, ${r.year}`, `${format(r.value)} ${esc(def.units || '')}`]);
     }
-    if (events.product) {
+    if (events.product && events.product.kind === 'disaster') {
+      const f = events.index;
+      rows.push(['Disaster alerts shown', String(events.shown.length)]);
+      for (const e of events.shown.filter((x) => x[f.alert] !== 'Green')) rows.push([e[f.alert], `${esc(e[f.name] || '')}`]);
+    } else if (events.product) {
       const f = events.index;
       const shown = events.shown;
       if (shown.length) {
@@ -748,7 +782,23 @@ function legendData() {
     const step = lines.def.step * displayUnit(lines.def.units, lines.def.labelUnits).a;
     out.lines = { title: lines.def.label, unit: `every ${+step.toPrecision(3)} ${lines.def.labelUnits}` };
   }
-  if (events.def && events.product) {
+  if (tracks.sources.length) {
+    const keys = tracks.sources.flatMap((s) => (s.def.kind === 'official'
+      ? [{ label: 'observed', colour: s.colour }, { label: 'official forecast', colour: s.colour, dashed: true }]
+      : [{ label: s.def.model, colour: s.colour }]));
+    const count = new Set(tracks.marks.map((m) => m.name || `${m.lon.toFixed(0)},${m.lat.toFixed(0)}`)).size;
+    const models = tracks.sources.some((s) => s.def.kind !== 'official');
+    const official = tracks.sources.find((s) => s.def.kind === 'official');
+    out.tracks = {
+      title: 'Tropical cyclones', count: count ? `${count} now` : '', keys,
+      note: [models ? 'models: found here in sea-level pressure (a closed 2 hPa contour; Ullrich and Zarzycki 2017)' : '',
+        official ? 'official: GDACS, automatic; not a warning' : ''].filter(Boolean).join(' · '),
+    };
+  }
+  if (events.def && events.product && events.product.kind === 'disaster') {
+    out.events = { kind: 'disaster', title: 'Disaster alerts', count: `${events.shown.length}`,
+      note: `GDACS alert levels, until a week after the last update · automatic; not an official warning` };
+  } else if (events.def && events.product) {
     const w = events.product.window;
     out.events = { title: 'Earthquakes', count: `${events.shown.length}`, note: `M ≥ ${events.product.selection.min_magnitude} · ${formatDay(Date.parse(w.start))} to the time shown · ${(events.product.source && events.product.source.credit) || 'USGS'}` };
   }
@@ -770,6 +820,7 @@ function updateCredits() {
     for (const r of [surface.product, surface.compare && surface.compare.product]) if (r && r.meta.source) credits.add(r.meta.source.credit);
   }
   if (events.product) credits.add(events.product.source.credit);
+  for (const s of tracks.sources) if (s.def.kind === 'official' && s.def.source) credits.add(s.def.source.credit);
   $('credits').textContent = [...credits].filter(Boolean).join(' · ');
 }
 
@@ -782,6 +833,21 @@ function updateLabels() {
     for (const m of lines.marks) {
       items.push({ key: `x${m.lon},${m.lat}`, text: `${m.text} ${m.value}`, html: `${m.text}<small>${m.value}</small>`, lon: m.lon, lat: m.lat, className: `pressure ${m.kind}`, font: '600 15px serif', size: 26, always: true });
     }
+  }
+  // One label per cyclone: its name, at the official position where there is one,
+  // and each model's central pressure (hPa) in that model's colour.
+  const cyclones = new Map();
+  tracks.marks.forEach((m, i) => {
+    const key = m.name || `unnamed${i}`;
+    if (!cyclones.has(key)) cyclones.set(key, { name: m.name, at: m, pressures: [] });
+    const c = cyclones.get(key);
+    if (m.source.kind === 'official') c.at = m;
+    if (m.hPa !== undefined) c.pressures.push(`<span style="color:${m.colour}">${Math.round(m.hPa)}</span>`);
+  });
+  for (const [key, c] of cyclones) {
+    const name = c.name ? esc(c.name.replace(/-\d+$/, '')) : '';
+    const html = `${name}${c.pressures.length ? `<small>${c.pressures.join(' ')}</small>` : ''}`;
+    if (html) items.push({ key: `tc${key}`, text: html, html, lon: c.at.lon, lat: c.at.lat, className: 'cyclone', font: '600 12px serif', size: 18, always: true });
   }
   if (state.labels) items.push(...base.labelItems(stage.zoomLevel(), state.lang));
   labels.update(items, (lon, lat) => stage.screen(lon, lat), stage.width, stage.height);
@@ -877,6 +943,7 @@ function remember() {
     if (!state.lights) q.set('nl', '0');
     if (state.clouds) q.set('cl', '1');
     if (state.events) q.set('e', state.events);
+    if (state.tracks.length) q.set('k', state.tracks.join(' '));
     if (!state.live) q.set('t', new Date(state.time).toISOString().slice(0, 16) + 'Z');
     if (state.pinned) q.set('at', `${state.pinned[0].toFixed(3)},${state.pinned[1].toFixed(3)}`);
     if (state.lang !== 'en') q.set('lang', state.lang);
@@ -897,6 +964,7 @@ function restore() {
   }
   for (const [k, key] of [['s', 'surface'], ['f', 'flow'], ['l', 'lines'], ['e', 'events'], ['m', 'compare']]) if (q.get(k)) state[key] = q.get(k);
   if (q.get('nl') === '0') state.lights = false;
+  if (q.get('k')) state.tracks = q.get('k').split(' ').filter(Boolean);
   if (q.get('cl') === '1') state.clouds = true;
   if (q.get('t')) { const t = Date.parse(q.get('t')); if (Number.isFinite(t)) { state.time = t; state.live = false; } }
   if (q.get('at')) { const a = q.get('at').split(',').map(Number); if (a.every(Number.isFinite)) state.pinned = a; }
@@ -934,7 +1002,7 @@ function loop(now) {
   if ((detail.target || 0) !== lastDetailTarget) { lastDetailTarget = detail.target || 0; dirty.legend = true; }
   if (dirty.labels) { dirty.labels = false; flow.viewChanged(); updateLabels(); }
   const res = stage.resolution;
-  base.frame(res); flow.frame(res); lines.frame(res); events.frame(res);
+  base.frame(res); flow.frame(res); lines.frame(res); events.frame(res); tracks.frame(res);
   stage.render();
   if (dirty.legend) { dirty.legend = false; renderLegend($('legend'), legendData()); updateCredits(); }
   if (dirty.place && now - lastPlace > (state.playing ? 400 : 120)) {

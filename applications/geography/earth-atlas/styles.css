@@ -76,6 +76,8 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) 330px; min-height: 0
 .label.pressure { font: 600 15px var(--serif); color: #fff6ee; translate: -50% -60%; }
 .label.pressure small { display: block; font: 10.5px var(--serif); text-align: center; color: var(--text-dim); margin-top: 1px; }
 .label.pressure.low { color: #e8c3dc; }
+.label.cyclone { font: 600 12px var(--serif); translate: 10px -50%; text-shadow: 0 0 3px rgba(20, 12, 22, 0.9), 0 0 6px rgba(20, 12, 22, 0.7); white-space: nowrap; }
+.label.cyclone small { display: block; font: 600 11px var(--serif); letter-spacing: 0.02em; }
 .label.pin {
   width: 18px; height: 18px; border: 1.5px solid var(--gold); border-radius: 50%;
   box-shadow: 0 0 0 1px rgba(18, 13, 20, 0.7), inset 0 0 0 1px rgba(18, 13, 20, 0.5);
@@ -111,6 +113,9 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) 330px; min-height: 0
 #legend .classes div { display: flex; flex-direction: column; gap: 1px; }
 #legend .classes span { white-space: nowrap; cursor: default; }
 #legend .classes i { display: inline-block; width: 10px; height: 8px; border-radius: 1px; margin-right: 5px; vertical-align: -0.5px; }
+#legend .keys i.line { width: 16px; height: 0; border-radius: 0; box-shadow: none; border-top: 2px solid var(--c); vertical-align: 3px; }
+#legend .keys i.line.dashed { border-top-style: dashed; }
+#layers .track-key { display: inline-block; width: 18px; height: 3px; border-radius: 2px; vertical-align: 3px; margin: 0 2px; }
 #legend .keys i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: -0.5px; box-shadow: 0 0 0 1px rgba(255,255,255,.25); }
 
 #credits {

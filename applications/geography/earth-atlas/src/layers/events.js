@@ -1,6 +1,8 @@
 // The events layer: things that happened at a place and an instant, up to the
 // time shown. Earthquakes are drawn by magnitude (size) and depth (colour), and
-// fade with age over the window of the product.
+// fade with age over the window of the product. Disasters (GDACS) are drawn by
+// their alert level (colour) and kind (size), from their start until a week
+// after their last update.
 
 import { MarkerLayer } from '../render/markers.js';
 
@@ -11,6 +13,10 @@ export const DEPTH_CLASSES = [
 ];
 
 export const radiusOf = (mag) => Math.max(2.5, 3.2 + 3.3 * (mag - 4.5));
+
+export const ALERTS = { Green: [143, 209, 180], Orange: [246, 196, 126], Red: [232, 132, 143] };
+export const DISASTER_SIZE = { TC: 9, DR: 9, VO: 8, FL: 7, EQ: 6, WF: 3.5 };
+const WEEK = 7 * 86400000;
 
 export class EventsLayer {
   constructor(stage, library) {
@@ -51,6 +57,21 @@ export class EventsLayer {
     const pos = [], col = [], size = [];
     this.shown = [];
     const p = [0, 0, 0];
+    if (this.product.kind === 'disaster') {
+      for (const e of this.product.events) {
+        const t = e[f.time_ms], end = e[f.end_ms];
+        if (t > time || time > end + WEEK) continue;
+        const age = Math.max(0, time - end) / WEEK;
+        if (!proj.project(e[f.lon], e[f.lat], p, 1.002)) continue;
+        const c = ALERTS[e[f.alert]] || ALERTS.Green;
+        pos.push(p[0], p[1], p[2]);
+        col.push(c[0] / 255, c[1] / 255, c[2] / 255, 1 - 0.6 * age);
+        size.push(DISASTER_SIZE[e[f.type]] || 6);
+        this.shown.push(e);
+      }
+      this.markers.set(new Float32Array(pos), new Float32Array(col), new Float32Array(size));
+      return;
+    }
     for (const e of this.product.events) {
       const t = e[f.time_ms];
       if (t > time) continue;
@@ -75,7 +96,8 @@ export class EventsLayer {
       const s = this.stage.screen(e[f.lon], e[f.lat]);
       if (!s) continue;
       const d = Math.hypot(s[0] - x, s[1] - y);
-      if (d < radiusOf(e[f.mag]) + 4 && d < bestD) { best = e; bestD = d; }
+      const r = this.product.kind === 'disaster' ? DISASTER_SIZE[e[f.type]] || 6 : radiusOf(e[f.mag]);
+      if (d < r + 4 && d < bestD) { best = e; bestD = d; }
     }
     return best && Object.fromEntries(this.product.fields.map((k, i) => [k, best[i]]));
   }

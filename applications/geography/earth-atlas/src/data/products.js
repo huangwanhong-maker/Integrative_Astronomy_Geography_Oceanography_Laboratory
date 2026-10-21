@@ -95,6 +95,15 @@ export class Library {
     return this.indicators.get(name);
   }
 
+  trackSet(name) {
+    if (!this.trackSets) this.trackSets = new Map();
+    if (!this.trackSets.has(name)) {
+      const entry = this.list('tracks').find((e) => e.name === name);
+      this.trackSets.set(name, json(`${this.base}/${entry.file}`));
+    }
+    return this.trackSets.get(name);
+  }
+
   eventSet(name) {
     if (!this.events.has(name)) {
       const entry = this.list('events').find((e) => e.name === name);

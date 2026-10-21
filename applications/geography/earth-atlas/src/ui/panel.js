@@ -120,6 +120,14 @@ export function buildPanel(el, catalogue, state, years, extra, on) {
     html.push(choice('lines', 'none', 'None', state.lines === 'none'));
     html.push(keyed('lines', byKey(catalogue.lines), state.lines));
   }
+  if (catalogue.tracks.length) {
+    html.push('<h3>Cyclones</h3>');
+    for (const t of catalogue.tracks) {
+      const on = state.tracks.includes(t.id);
+      const swatch = t.kind === 'official' ? 'linear-gradient(90deg, #f6ece8 50%, transparent 50%) 0 0 / 8px 100%' : extra.modelColour(t.model);
+      html.push(`<label class="check track"><input type="checkbox" data-track="${esc(t.id)}"${on ? ' checked' : ''}><span class="track-key" style="background:${swatch}"></span> ${esc(t.label)}</label>`);
+    }
+  }
   if (catalogue.events.length) {
     html.push('<h3>Events</h3>');
     const kinds = new Map();
@@ -129,7 +137,7 @@ export function buildPanel(el, catalogue, state, years, extra, on) {
     }
     for (const [kind, list] of kinds) {
       const checked = list.some((e) => e.id === state.events);
-      const label = kind === 'earthquake' ? 'Earthquakes' : kind;
+      const label = kind === 'earthquake' ? 'Earthquakes' : kind === 'disaster' ? 'Disaster alerts (GDACS)' : kind;
       html.push(`<label class="check"><input type="checkbox" data-events="${esc(list[0].id)}"${checked ? ' checked' : ''}> ${esc(label)}</label>`);
       if (list.length > 1) {
         const span = (e) => {
@@ -152,15 +160,20 @@ export function buildPanel(el, catalogue, state, years, extra, on) {
     } else {
       html.push(`<div class="runs">${kinds.map(([k, label]) => `<button type="button" class="run" data-run-lab="${k}">Run ${label.toLowerCase()}</button>`).join('')}</div>`);
     }
-    const ran = kinds.filter(([k]) => lab.runs[k] && lab.runs[k].length);
-    if (ran.length) {
-      const leads = lab.runs[ran[0][0]].filter((r) => r.hours % 24 === 0).map((r) => r.hours);
-      const cell = (k, h) => { const r = lab.runs[k].find((x) => x.hours === h); return r ? `${Math.round(r.model)} m` : '—'; };
-      const persistence = (h) => { const r = lab.runs[ran[0][0]].find((x) => x.hours === h); return r ? `${Math.round(r.persistence)} m` : '—'; };
-      html.push(`<table class="verify"><thead><tr><th>Lead</th>${ran.map(([, label]) => `<th>${label}</th>`).join('')}<th>Persistence</th></tr></thead><tbody>${leads
-        .map((h) => `<tr><th>+${h} h</th>${ran.map(([k]) => `<td>${cell(k, h)}</td>`).join('')}<td>${persistence(h)}</td></tr>`).join('')}</tbody></table>`);
-      const all = ran.flatMap(([k]) => lab.runs[k]);
-      html.push(`<p class="note">Root-mean-square error of height, 20–80° N, against ${esc(lab.against)}${all.some((r) => r.against === 'forecast') ? ' (its forecast, beyond the present)' : ' analyses'}.</p>`);
+    // Runs of the laboratory's models, and AI models run here (products with a
+    // verification), compared at the same start when they share one.
+    const columns = kinds.filter(([k]) => lab.runs[k] && lab.runs[k].length).map(([k, label]) => [label, lab.runs[k]]);
+    const ai = (extra.ai || []).filter((a) => !columns.length || a.start === lab.start);
+    if (!columns.length && ai.length) html.push(`<p class="note">${esc(ai[0].label)}, run here from the GFS analysis of ${esc(new Date(ai[0].start).toISOString().slice(0, 13).replace('T', ' '))} UTC:</p>`);
+    columns.push(...ai.slice(0, columns.length ? 3 : 1).map((a) => [a.short, a.leads]));
+    if (columns.length) {
+      const leads = columns[0][1].filter((r) => r.hours % 24 === 0).map((r) => r.hours);
+      const cell = (rows, h) => { const r = rows.find((x) => x.hours === h); return r ? `${Math.round(r.model)} m` : '—'; };
+      const persistence = (h) => { const r = columns[0][1].find((x) => x.hours === h); return r ? `${Math.round(r.persistence)} m` : '—'; };
+      html.push(`<table class="verify"><thead><tr><th>Lead</th>${columns.map(([label]) => `<th>${esc(label)}</th>`).join('')}<th>Persistence</th></tr></thead><tbody>${leads
+        .map((h) => `<tr><th>+${h} h</th>${columns.map(([, rows]) => `<td>${cell(rows, h)}</td>`).join('')}<td>${persistence(h)}</td></tr>`).join('')}</tbody></table>`);
+      const all = columns.flatMap(([, rows]) => rows);
+      html.push(`<p class="note">Root-mean-square error of height, 20–80° N, against ${esc(lab.against || 'GFS')}${all.some((r) => r.against === 'forecast') ? ' (its forecast, beyond the present)' : ' analyses'}.</p>`);
     }
     if (lab.error) html.push(`<p class="note">${esc(lab.error)}</p>`);
     html.push('</div>');
@@ -182,6 +195,7 @@ export function buildPanel(el, catalogue, state, years, extra, on) {
   el.querySelectorAll('button[data-model]').forEach((b) => b.addEventListener('click', () => on[b.dataset.model](b.dataset.id)));
   const cmp = el.querySelector('select[data-compare]');
   if (cmp) cmp.addEventListener('change', () => on.compare(cmp.value || null));
+  el.querySelectorAll('input[data-track]').forEach((i) => i.addEventListener('change', () => on.track(i.dataset.track, i.checked)));
   el.querySelectorAll('input[data-events]').forEach((i) => i.addEventListener('change', () => on.events(i.checked ? i.dataset.events : null)));
   el.querySelectorAll('button[data-events-window]').forEach((b) => b.addEventListener('click', () => on.events(b.dataset.eventsWindow)));
   el.querySelectorAll('button[data-style]').forEach((b) => b.addEventListener('click', () => on.base('style', b.dataset.style)));
