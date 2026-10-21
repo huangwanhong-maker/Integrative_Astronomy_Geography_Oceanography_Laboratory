@@ -15,7 +15,7 @@ Manifests are read by [`../acquisition/fetch.py`](../acquisition/fetch.py). It d
 | `files` | Fixed files, downloaded as they are, or taken from a zip archive on the web. Each file's SHA-256 is recorded in the manifest and verified on every retrieval. | `jpl-de440s`, `natural-earth-50m`, `solar-system-maps`, `koppen-geiger` |
 | `tap` | A query to an astronomical archive through the IVOA Table Access Protocol | `gaia-dr3`, `ungc`, `tully-2mass-groups` |
 | `griddap` | A subset of a gridded dataset served by ERDDAP: which variables, which times, how fine a grid | `gfs`, `oisst`, `ww3`, `etopo-2022` |
-| `http` | One or more web requests built from URL templates | `worldbank-indicators`, `usgs-earthquakes`, `gibs-daily`, `gibs-static` |
+| `http` | One or more web requests built from URL templates | `worldbank-indicators`, `usgs-earthquakes`, `gibs-daily`, `gibs-static`, `gibs-relief` |
 | `ncss` | Groups of variables of a forecast model's collection on a THREDDS server, by its NetCDF Subset Service: levels, times and grid spacing | `gfs-levels`, `aigfs`, `aigefs` |
 | `opendap` | One variable from each of several datasets on an OPeNDAP (DAP2) server, every n-th point of the grid, saved as netCDF classic | `terraclimate-normals` |
 

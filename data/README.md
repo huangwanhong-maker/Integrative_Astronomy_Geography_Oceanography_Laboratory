@@ -63,7 +63,7 @@ Products are written to `data/cache/products/` and listed by kind in `index.json
 | `classes` | `class_raster.py` | A category per cell of a regular grid, such as climate classes, by period and scenario; the legend (code, name, the authors' colour) and the share of land in each class | `.bin` (uint8, 0 for no value) and `.json` |
 | `indicators` | `country_indicators.py` | A value per economy and year, keyed by World Bank codes with ISO alpha-2; aggregates kept apart | `.json` |
 | `events` | `event_catalog.py` | Events at a place and an instant: time, longitude, latitude, depth, magnitude | `.json` |
-| `imagery` | `imagery.py`, `body_maps.py` | Equirectangular images with a role. The Earth (`day`, `night-lights`): true colour of a day (gaps filled from the day before), the Blue Marble, the Black Marble, with the provider's service for detail. Other bodies (`body`), Saturn's rings (`rings`, a radial strip) and the whole sky in galactic coordinates (`sky`, its orientation checked against bright stars). | `.jpg` or `.png`, and `.json` |
+| `imagery` | `imagery.py`, `body_maps.py` | Equirectangular images with a role. Shaded relief of the land (`relief-shading`), with its grey levels of water and flat land, for detail at close range. The Earth (`day`, `night-lights`): true colour of a day (gaps filled from the day before), the Blue Marble, the Black Marble, with the provider's service for detail. Other bodies (`body`), Saturn's rings (`rings`, a radial strip) and the whole sky in galactic coordinates (`sky`, its orientation checked against bright stars). | `.jpg` or `.png`, and `.json` |
 
 ## 5. Datasets
 
@@ -89,6 +89,7 @@ Products are written to `data/cache/products/` and listed by kind in `index.json
 | `aigefs` | ncss | NOAA NCEP and EPIC, via Unidata THREDDS | NOAA's AI ensemble: mean and spread |
 | `gibs-daily` | http | NASA GIBS | Yesterday's Earth from VIIRS, true colour |
 | `gibs-static` | http | NASA GIBS | The Blue Marble by day, the Black Marble by night |
+| `gibs-relief` | http | NASA GIBS, from ASTER GDEM (METI and NASA) | Shaded relief of the land from 30 m elevations: a global preview, and detail at close range |
 | `solar-system-maps` | files | Solar System Scope (INOVE), from NASA, JPL and ESA data, via Wikimedia Commons | Maps of the Sun, the Moon, the planets, Saturn's rings and the Milky Way |
 | `koppen-geiger` | files (members of a remote archive) | Beck et al. 2023, via figshare | Köppen–Geiger climate classes at 0.1°, 1901–2099, past and under four scenarios |
 | `terraclimate-normals` | opendap | Abatzoglou et al. 2018 (TerraClimate), via the Northwest Knowledge Network | Monthly normals of 1991–2020: daily maximum and minimum temperature, precipitation |
