@@ -1,7 +1,8 @@
 // The Earth's surface as drawn by the GPU: the base map (relief or imagery,
 // with finer detail where the user looks), lights at night, forecast clouds,
-// one data layer (a field, a difference of two fields, or a choropleth of
-// countries), and day and night, on the globe or on a flat map.
+// one data layer (a field, a difference of two fields, a choropleth of
+// countries, or a map of classes and how they changed between two periods),
+// and day and night, on the globe or on a flat map.
 //
 // One fragment shader serves every projection. For the globe it reads the
 // place from the sphere's surface; for a flat map it inverts the projection at
@@ -46,7 +47,8 @@ uniform sampler2D uDetail;        // finer imagery or relief of one region
 uniform vec4 uDetailBox;          // west longitude, south latitude, width, height (degrees)
 uniform float uDetailOn;
 
-uniform int uMode;                // 0 none, 1 field, 2 speed of a vector, 3 countries, 4 difference A - B
+uniform int uMode;                // 0 none, 1 field, 2 speed of a vector, 3 countries, 4 difference A - B,
+                                  // 5 classes, 6 classes where they differ from a second map
 uniform sampler2D uA0, uA1, uB0, uB1;
 uniform float uMix, uMixB;        // weights of the later time, for A and for B
 uniform vec4 uGrid, uGridB;       // lon0, dlon, lat0, dlat (degrees)
@@ -57,6 +59,10 @@ uniform float uOpacity;
 uniform float uReliefOnData;
 uniform usampler2D uCountries;    // 1 + index of the country at each pixel, 0 for none
 uniform sampler2D uCountryColours;
+uniform usampler2D uK0, uK1;      // class of each cell (0 for none): the map shown, and another
+uniform vec4 uGridK, uGridKB;
+uniform ivec3 uGridNK, uGridNKB;
+uniform sampler2D uClassColours;  // RGBA for each class value
 
 uniform sampler2D uC0, uC1;       // cloud cover (%)
 uniform float uMixC, uCloudOn;
@@ -106,6 +112,16 @@ float fieldAt(sampler2D t, vec2 ll, vec4 grid, ivec3 gridN) {
   float weight = dot(w, ok);
   if (weight < 0.5) return MISSING;
   return dot(w * ok, v) / weight;
+}
+
+// The class of the cell containing a place: no interpolation between classes.
+uint classAt(usampler2D t, vec2 ll, vec4 grid, ivec3 gridN) {
+  float x = floor((ll.x - grid.x) / grid.y + 0.5);
+  if (gridN.z == 1) x = mod(x, float(gridN.x));
+  else if (x < 0.0 || x > float(gridN.x) - 1.0) return 0u;
+  float y = floor((grid.z - ll.y) / grid.w + 0.5);
+  if (y < 0.0 || y > float(gridN.y) - 1.0) return 0u;
+  return texelFetch(t, ivec2(int(x), int(y)), 0).r;
 }
 
 float atTime(sampler2D t0, sampler2D t1, float mixT, vec2 ll, vec4 grid, ivec3 gridN) {
@@ -214,6 +230,18 @@ void main() {
       vec3 shaded = c.rgb * mix(1.0, shade, uReliefOnData) * dataNight;
       colour = mix(colour, shaded, c.a * uOpacity);
     }
+  } else if (uMode == 5 || uMode == 6) {
+    uint k = classAt(uK0, ll, uGridK, uGridNK);
+    if (k > 0u) {
+      vec4 c = texelFetch(uClassColours, ivec2(int(k), 0), 0);
+      if (uMode == 6 && classAt(uK1, ll, uGridKB, uGridNKB) == k) {
+        // Unchanged: a quiet wash of the class, so that the changes stand out.
+        c.rgb = mix(c.rgb, vec3(dot(c.rgb, vec3(0.30, 0.55, 0.15))), 0.7);
+        c.a *= 0.3;
+      }
+      vec3 shaded = c.rgb * mix(1.0, shade, uReliefOnData) * dataNight;
+      colour = mix(colour, shaded, c.a * uOpacity);
+    }
   } else if (uMode == 3) {
     ivec2 size = textureSize(uCountries, 0);
     ivec2 px = ivec2(clamp(uv * vec2(size), vec2(0.0), vec2(size) - 1.0));
@@ -253,6 +281,9 @@ export function createSurfaceMaterial() {
   colours.needsUpdate = true;
   const base = new THREE.DataTexture(new Uint8Array([60, 50, 70, 128]), 1, 1, THREE.RGBAFormat);
   base.needsUpdate = true;
+  const noClasses = () => classTexture({ values: new Uint8Array(4), grid: { nlon: 4, nlat: 1 } });
+  const classColours = new THREE.DataTexture(new Uint8Array(256 * 4), 256, 1, THREE.RGBAFormat);
+  classColours.needsUpdate = true;
   return new THREE.ShaderMaterial({
     glslVersion: THREE.GLSL3,
     vertexShader,
@@ -276,6 +307,10 @@ export function createSurfaceMaterial() {
       uReliefOnData: { value: 0.55 },
       uCountries: { value: countries },
       uCountryColours: { value: colours },
+      uK0: { value: noClasses() }, uK1: { value: noClasses() },
+      uGridK: { value: new THREE.Vector4(0, 1, 0, 1) }, uGridKB: { value: new THREE.Vector4(0, 1, 0, 1) },
+      uGridNK: { value: new THREE.Vector3(1, 1, 0) }, uGridNKB: { value: new THREE.Vector3(1, 1, 0) },
+      uClassColours: { value: classColours },
       uC0: { value: empty() }, uC1: { value: empty() }, uMixC: { value: 0 }, uCloudOn: { value: 0 },
       uGridC: { value: new THREE.Vector4(0, 1, 0, 1) }, uGridNC: { value: new THREE.Vector3(1, 1, 0) },
       uSun: { value: new THREE.Vector3(1, 0, 0) },
@@ -345,6 +380,36 @@ export function setCountryColours(material, colours) {
   t.needsUpdate = true;
   material.uniforms.uCountryColours.value.dispose();
   material.uniforms.uCountryColours.value = t;
+}
+
+// A class map as an integer texture (one byte per cell).
+export function classTexture(raster) {
+  const g = raster.grid;
+  const t = new THREE.DataTexture(raster.values, g.nlon, g.nlat, THREE.RedIntegerFormat, THREE.UnsignedByteType);
+  t.internalFormat = 'R8UI';
+  t.minFilter = t.magFilter = THREE.NearestFilter;
+  t.generateMipmaps = false;
+  t.unpackAlignment = 1;
+  t.needsUpdate = true;
+  return t;
+}
+
+// Points the material at a class map (mode 5), or at the cells where it differs
+// from another (mode 6). colours: Uint8Array of 256 RGBA entries, by class value.
+export function setClasses(material, texture, raster, colours, other = null) {
+  const u = material.uniforms;
+  u.uK0.value = texture;
+  u.uGridK.value.set(raster.grid.lon0, raster.grid.dlon, raster.grid.lat0, raster.grid.dlat);
+  u.uGridNK.value.set(raster.grid.nlon, raster.grid.nlat, raster.grid.periodic ? 1 : 0);
+  if (other) {
+    u.uK1.value = other.texture;
+    const g = other.raster.grid;
+    u.uGridKB.value.set(g.lon0, g.dlon, g.lat0, g.dlat);
+    u.uGridNKB.value.set(g.nlon, g.nlat, g.periodic ? 1 : 0);
+  }
+  u.uClassColours.value.image.data.set(colours);
+  u.uClassColours.value.needsUpdate = true;
+  u.uMode.value = other ? 6 : 5;
 }
 
 // A cache of field textures, keyed by product, variable and time index.

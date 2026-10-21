@@ -1,20 +1,21 @@
 # Earth Atlas
 
-*Status: draft (2026-10-22). Kind: tool. Field: geography (cartography), showing data from meteorology, oceanography, geography and geophysics.* Decision records: [ADR 0014](../../../development/decisions/0014-earth-atlas-separated-data-and-typed-layers.md), [ADR 0015](../../../development/decisions/0015-earth-atlas-models-imagery-detail.md).
+*Status: draft (2026-10-22). Kind: tool. Field: geography (cartography), showing data from meteorology, oceanography, geography and geophysics.* Decision records: [ADR 0014](../../../development/decisions/0014-earth-atlas-separated-data-and-typed-layers.md), [ADR 0015](../../../development/decisions/0015-earth-atlas-models-imagery-detail.md), [ADR 0017](../../../development/decisions/0017-climate-classes-and-normals.md).
 
-The Earth Atlas shows the atmosphere, the ocean, the land and the people of the Earth on one globe, at one instant. Each kind of data comes from its own dataset and is joined to the map only here, in the application. Forecasts from several models can be compared, among them a model of our own that runs in the page. The map itself is one dataset among others, and carries no values but names and places.
+The Earth Atlas shows the atmosphere, the ocean, the land and the people of the Earth on one globe, at one instant. Each kind of data comes from its own dataset and is joined to the map only here, in the application. Forecasts from several models can be compared, among them a model of our own that runs in the page. Climates can be read too: their classes from 1901 to 2099, and the normal year of any place. The map itself is one dataset among others, and carries no values but names and places.
 
 ## 1. Concepts
 
-- **Separated data.** The data library builds five kinds of product, each with its own provenance:
+- **Separated data.** The data library builds six kinds of product, each with its own provenance:
   - **geography:** coasts, countries, rivers, places and names (Natural Earth);
-  - **fields:** gridded quantities over time (forecasts, analyses, relief, or our own model output);
+  - **fields:** gridded quantities over time (forecasts, analyses, relief, climate normals, or our own model output);
+  - **classes:** a category per cell (climate classes, by period and scenario);
   - **indicators:** a value per country and year (World Bank);
   - **events:** points in place and time (earthquakes, from the USGS);
   - **imagery:** pictures of the whole Earth (NASA's VIIRS, Blue Marble and Black Marble).
 - **Joins.** The atlas joins indicators to countries by stated keys, and reports what does not match.
 - **Typed layers.** What can be drawn is set by the shape of the data, not its subject. One of each kind can be shown at once:
-  - a **surface:** a field, or a value per country, in colour;
+  - a **surface:** a field, a value per country, or a class per cell, in colour;
   - a **flow:** a vector field, shown by moving particles;
   - **lines:** isolines, with highs and lows;
   - **events**;
@@ -24,6 +25,11 @@ The Earth Atlas shows the atmosphere, the ocean, the land and the people of the 
   - Any two models can be shown as a difference.
   - The place card gives each model's value and draws their courses together.
   - Ensemble spread is a layer of its own.
+- **Climate.**
+  - Köppen–Geiger classes for four past periods and two future ones under four emission scenarios (Beck et al. 2023). Any two maps can be compared, which shows where the climate changed class.
+  - The atlas also classifies the TerraClimate normals of 1991–2020 itself and offers the result beside the published map.
+  - Monthly normals of temperature and precipitation follow the month of the time shown.
+  - The place card draws the normal year of any place on land as a climate diagram (Walter and Lieth 1960).
 - **Our own model.** The barotropic vorticity equation runs in the page from the GFS analysis, the same equation as the first numerical weather prediction (1950). It is verified against later analyses and against persistence.
 - **One instant, in UTC.**
   - Each layer shows its data nearest to that instant, and says which time it shows.
@@ -41,8 +47,10 @@ python data/acquisition/fetch.py gibs-daily                               # yest
 python data/acquisition/fetch.py gibs-static --profile blue-marble
 python data/acquisition/fetch.py gibs-static --profile black-marble
 python data/acquisition/fetch.py worldbank-indicators --profile population    # and other profiles; see --list
+python data/acquisition/fetch.py koppen-geiger terraclimate-normals        # climate classes and normals
 python data/products/geography.py
-for s in etopo-2022 gfs oisst ww3 gfs-levels aigfs aigefs; do python data/products/field_grid.py --source $s; done
+for s in etopo-2022 gfs oisst ww3 gfs-levels aigfs aigefs terraclimate-normals; do python data/products/field_grid.py --source $s; done
+python data/products/class_raster.py --source koppen-geiger
 python data/products/imagery.py --source gibs-daily
 python data/products/imagery.py --source gibs-static --profile blue-marble
 python data/products/imagery.py --source gibs-static --profile black-marble
@@ -71,7 +79,7 @@ The page also loads three.js from jsDelivr and Source Serif 4 from Google Fonts.
 | Data | Source | Product | Licence |
 |---|---|---|---|
 | Coasts, countries, boundaries, lakes, rivers, ice, places, sea names | Natural Earth 1:50 m, v5.1.2 | `geography-ne50m` | Public domain |
-| Relief of land and sea floor | ETOPO 2022 (NOAA NCEI), 10′ | `fields-etopo-2022-medium` | Public domain |
+| Relief of land and sea floor | ETOPO 2022 (NOAA NCEI), 10′, or 5′ with `--profile fine` (the finest is used) | `fields-etopo-2022-medium`, `-fine` | Public domain |
 | Wind, temperature, pressure, precipitation, humidity | GFS (NOAA NCEP), via PacIOOS ERDDAP, 1°, every 6 h | `fields-gfs-forecast` | Public domain |
 | The atmosphere aloft (850, 500, 250 hPa); cloud, water vapour, CAPE | GFS, via Unidata THREDDS, 1°, every 6 h, three days back | `fields-gfs-levels-forecast` | Public domain |
 | An AI forecast: surface, 850, 500 and 250 hPa | AIGFS (NOAA NCEP and EPIC), via Unidata THREDDS, 1° | `fields-aigfs-forecast` | Public domain |
@@ -81,6 +89,8 @@ The page also loads three.js from jsDelivr and Source Serif 4 from Google Fonts.
 | The Earth from space, by day and by night | NASA GIBS: VIIRS true colour, Blue Marble, Black Marble, 8192 × 4096 | `imagery-*` | NASA, acknowledge |
 | Country indicators (11) | World Bank, World Development Indicators | `indicator-*` | CC BY 4.0 |
 | Earthquakes | USGS ComCat, magnitude 4.5 and above | `events-usgs-earthquakes-*` | Public domain |
+| Climate classes, 1901–2099 | Köppen–Geiger maps of Beck et al. (2023), 0.1°: 1901–1930, 1931–1960, 1961–1990, 1991–2020; 2041–2070 and 2071–2099 under SSP1-2.6, SSP2-4.5, SSP3-7.0 and SSP5-8.5 | `classes-koppen-geiger-*` | CC BY 4.0 |
+| Climate normals, 1991–2020 | TerraClimate (Abatzoglou et al. 2018), monthly daily maximum and minimum temperature and precipitation, every 1/3°, via OPeNDAP | `fields-terraclimate-normals-medium` | CC0 |
 
 The ERDDAP servers add: "The data may be used and redistributed for free but is not intended for legal use, since it may contain inaccuracies." Citations are in each manifest in [data/registry](../../../data/registry/), and in the atlas under *Data*.
 
@@ -100,6 +110,8 @@ The ERDDAP servers add: "The data may be used and redistributed for free but is 
 | Countries | Scanline rasterisation, even-odd rule, 4096 × 2048. Joins to indicators by stated keys. | `src/core/raster.js`, `src/core/join.js` |
 | Relief | Hypsometric tints, and Lambert shading from the north-west at 45°, exaggerated 14× on the 10′ grid | Imhof (1982) |
 | Colour maps | cmocean (Thyng et al. 2016, MIT licence), and the laboratory's own orchid map, with lightness rising evenly | `src/render/colormaps.js` |
+| Climate classes | Köppen–Geiger after Peel et al. (2007) and Beck et al. (2018): B first, summer the warmer half-year. Classes are read from the cell containing a place, never interpolated. Colours are the conventional ones, softened in OKLab. | `src/core/climate.js`, `src/render/classes.js`; [theory note](../../../theory/climate/koppen-geiger-classification.md) |
+| Climate diagram | Walter and Lieth (1960): 10 °C level with 20 mm; dry months (P ≤ 2T, Gaussen) dotted, humid hatched, above 100 mm a tenfold scale; frost months marked; from July south of the equator | `src/ui/climate.js` |
 | Conventions | Wind direction is where it blows from. Times in UTC. Values stored in their source units and converted only for display (vorticity in 10⁻⁵ s⁻¹). | `src/core/derived.js`, `src/core/units.js` |
 
 ## 5. Verification
@@ -108,7 +120,7 @@ The ERDDAP servers add: "The data may be used and redistributed for free but is 
 node applications/geography/earth-atlas/tests/run-tests.mjs
 ```
 
-There are 78 checks. The checks on real data need the products; without them they are skipped.
+There are 93 checks. The checks on real data need the products; without them they are skipped.
 
 | Quantity | Reference | Agreement |
 |---|---|---|
@@ -124,6 +136,9 @@ There are 78 checks. The checks on real data need the products; without them the
 | Particles | Uniform flow along the equator; solid-body rotation, 2000 steps | Exact; latitude kept to 8 × 10⁻⁶ ° |
 | Rasterised land | Polygon area by the shoelace formula on the cylindrical equal-area plane | Within 8 × 10⁻⁶ of the sphere |
 | Joins | Natural Earth to World Bank | 219 of 242 countries; only Gibraltar unmatched |
+| Köppen–Geiger rules | Fifteen climates constructed for one rule each, including the precedence of B and both resolutions of s and w; all 30 classes reachable | Exact |
+| Köppen–Geiger symmetry | Invariance under (S₆ × S₆) ≀ ℤ/2, permutations within each half-year and their exchange, on 4000 random climates | Exact |
+| Our classes | Beck et al. (2023), 1991–2020, at the 195 203 land cells of the TerraClimate grid | 89.1 % of cells; 95.9 % by main group |
 
 Fetch the reference values again with `python applications/geography/earth-atlas/tests/fetch_fixtures.py`.
 
@@ -136,9 +151,10 @@ The computation in `src/core/` is a provisional stand-in for the laboratory's C+
 | `src/core/sphere.js` | Places, directions, distances, great circles | `core/domains/geodesy` |
 | `src/core/sun.js` | The Sun's position, subsolar point, altitude, twilight | `core/domains/astronomy` |
 | `src/core/projections.js` | Equal Earth and equirectangular, forward and inverse | `core/domains/geography` (cartography) |
-| `src/core/grid.js` | Fields: grid positions, interpolation, time brackets; computed fields | `core/inference` |
+| `src/core/grid.js` | Fields: grid positions, interpolation, time brackets, climatological months; computed fields; class maps | `core/inference` |
 | `src/core/spectral.js` | Spherical harmonics, Gaussian grids, spectral transforms | calx, physis (discretisation) |
 | `src/core/barotropic.js` | The barotropic vorticity model; linear balance | `core/domains/meteorology` |
+| `src/core/climate.js` | Köppen–Geiger classes; dry months after Gaussen | `core/domains/climate` (zones) |
 | `src/core/contour.js` | Isolines, highs and lows | `core/domains/geography` |
 | `src/core/raster.js` | Polygons to rasters, areas | `core/domains/geography` (GIS) |
 | `src/core/flow.js` | Particles carried by a flow on the sphere | physis (kinematics) |
@@ -148,8 +164,8 @@ The computation in `src/core/` is a provisional stand-in for the laboratory's C+
 | `src/data/products.js` | Reads products from the data library | — |
 | `src/layers/` | The catalogue of layers and models; one module per kind of layer; imagery and detail; the laboratory model | `visualization/scene` |
 | `src/workers/` | The laboratory model's integration, off the page's main thread | — |
-| `src/render/` | The surface shader, lines, markers, labels, relief, colour maps, the stage | `visualization/renderers` |
-| `src/ui/` | Panel, timeline, legend, place card | — |
+| `src/render/` | The surface shader, lines, markers, labels, relief, colour maps, colours of classes, the stage | `visualization/renderers` |
+| `src/ui/` | Panel, timeline, legend, place card, climate diagram | — |
 
 ## 7. Limits
 
@@ -158,4 +174,6 @@ The computation in `src/core/` is a provisional stand-in for the laboratory's C+
 - The laboratory model is barotropic. It has little skill in the tropics, and its long waves drift west too fast (it lacks the equivalent-barotropic correction).
 - Detail is available for imagery, not yet for relief; ETOPO's server does not allow browsers to fetch it directly.
 - Natural Earth draws boundaries by its de facto depiction; disputed boundaries are dashed.
+- Climate classes are shown at 0.1°, about 11 km; Beck et al.'s maps exist at 1 km. The TerraClimate normals are point samples every 1/3°, not area means, and have no values over the sea.
+- The future maps show the classes of an ensemble-mean climate, not the spread among models.
 - Climate-model and reanalysis archives (CMIP, ERA5) are not yet registered: ERA5 needs a Copernicus account, and CMIP data are served by ESGF.

@@ -4,7 +4,7 @@
 // what has been built; each product's metadata is small and read at once, and
 // its values (the larger binary files) are read when a layer first needs them.
 
-import { FieldProduct } from '../core/grid.js';
+import { FieldProduct, ClassRaster } from '../core/grid.js';
 
 async function json(url) {
   const r = await fetch(url);
@@ -38,6 +38,8 @@ export class Library {
     this.fields = new Map();
     this.indicators = new Map();
     this.events = new Map();
+    this.classMeta = new Map();
+    this.classMaps = new Map();
   }
 
   async open() {
@@ -45,6 +47,9 @@ export class Library {
     const fields = this.index.fields || [];
     const metas = await Promise.all(fields.map((e) => json(`${this.base}/${e.file}`).catch(() => null)));
     fields.forEach((e, i) => { if (metas[i]) this.fieldMeta.set(e.name, metas[i]); });
+    const classes = this.index.classes || [];
+    const cmetas = await Promise.all(classes.map((e) => json(`${this.base}/${e.file}`).catch(() => null)));
+    classes.forEach((e, i) => { if (cmetas[i]) this.classMeta.set(e.name, cmetas[i]); });
     return this;
   }
 
@@ -65,6 +70,21 @@ export class Library {
       this.fields.set(name, binary(`${this.base}/${meta.file}`, onProgress).then((b) => new FieldProduct(meta, b)));
     }
     return this.fields.get(name);
+  }
+
+  // A class product (a category per cell), read once.
+  classes(name) {
+    if (!this.classMaps.has(name)) {
+      const meta = this.classMeta.get(name);
+      this.classMaps.set(name, binary(`${this.base}/${meta.file}`).then((b) => new ClassRaster(meta, b)));
+    }
+    return this.classMaps.get(name);
+  }
+
+  // A class product computed in the application, offered like one from the library.
+  addClasses(raster) {
+    this.classMeta.set(raster.meta.name, raster.meta);
+    this.classMaps.set(raster.meta.name, Promise.resolve(raster));
   }
 
   indicator(name) {

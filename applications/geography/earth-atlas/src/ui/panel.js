@@ -1,6 +1,6 @@
-// The layer panel: what is drawn on the surface and by which model, what
-// moves, which lines and events are shown, the laboratory's own model, and how
-// the base map looks.
+// The layer panel: what is drawn on the surface and by which model (or, for
+// climate classes, which period, scenario and source), what moves, which lines
+// and events are shown, the laboratory's own model, and how the base map looks.
 
 import { cssGradient } from '../render/colormaps.js';
 import { DOMAINS, byKey } from '../layers/catalogue.js';
@@ -18,7 +18,11 @@ function choice(name, value, label, checked, swatch) {
   return `<label class="choice"><input type="radio" name="${name}" value="${esc(value)}"${checked ? ' checked' : ''}>${mark}<span>${esc(label)}</span></label>`;
 }
 
+// The Köppen–Geiger hues in a gradient, for the swatch of a class map.
+const CLASS_SWATCH = 'linear-gradient(90deg, #6f86c9, #8ea9dc 18%, #d98d7f 30%, #e2c07c 42%, #cfd08a 55%, #93c08f 66%, #a98ab8 78%, #79b4c4 88%, #b9b3b3)';
+
 function swatchOf(def) {
+  if (def.kind === 'classes') return CLASS_SWATCH;
   const st = def.style;
   return st ? cssGradient(st.colormap, { reverse: st.reverse, clip: st.clip }) : null;
 }
@@ -30,6 +34,34 @@ function models(kind, defs, current) {
     `<button type="button" data-model="${kind}" data-id="${esc(d.id)}" aria-pressed="${d.id === current}">${esc(d.model)}</button>`).join('')}</div>`;
 }
 
+// Maps of classes: a row of periods, the scenarios of a future period, the
+// sources of a period, and another map to compare with. Each button chooses a
+// map by its id, keeping the scenario where it can.
+const shortPeriod = (p) => `${p[0]}–${String(p[1]).slice(String(p[0]).slice(0, 2) === String(p[1]).slice(0, 2) ? 2 : 0)}`;
+const samePeriod = (a, b) => a[0] === b[0] && a[1] === b[1];
+
+function classChoices(kind, defs, active, compare) {
+  const html = [];
+  const button = (d, label, pressed) => `<button type="button" data-model="${kind}" data-id="${esc(d.id)}" aria-pressed="${pressed}">${esc(label)}</button>`;
+  const library = defs.filter((d) => !d.computed);
+  const periods = [];
+  for (const d of library) if (!periods.some((p) => samePeriod(p, d.period))) periods.push(d.period);
+  periods.sort((a, b) => a[0] - b[0]);
+  const pick = (period, scenario) => library.find((d) => samePeriod(d.period, period) && d.scenario === scenario)
+    || library.find((d) => samePeriod(d.period, period) && d.scenario === 'SSP2-4.5')
+    || library.find((d) => samePeriod(d.period, period));
+  html.push(`<div class="models periods" role="group" aria-label="Period">${periods.map((p) => button(pick(p, active.scenario), shortPeriod(p), samePeriod(p, active.period))).join('')}</div>`);
+  const scenarios = library.filter((d) => samePeriod(d.period, active.period) && d.scenario);
+  if (scenarios.length) html.push(`<div class="models" role="group" aria-label="Scenario">${scenarios.map((d) => button(d, d.scenario, d.id === active.id)).join('')}</div>`);
+  const sources = defs.filter((d) => samePeriod(d.period, active.period) && !d.scenario);
+  if (sources.length > 1) html.push(`<div class="models" role="group" aria-label="Source">${sources.map((d) => button(d, d.computed ? 'Ours, from normals' : 'Beck et al.', d.id === active.id)).join('')}</div>`);
+  const options = [`<option value="">—</option>`, ...defs.filter((d) => d.id !== active.id)
+    .map((d) => `<option value="${esc(d.id)}"${compare && d.id === compare.id ? ' selected' : ''}>${esc(d.model)}</option>`)];
+  const word = compare && compare.period && compare.period[1] < active.period[0] ? 'changed since' : 'differs from';
+  html.push(`<label class="compare"><span>${word}</span><select data-compare aria-label="Compare with">${options.join('')}</select></label>`);
+  return html.join('');
+}
+
 // A list of keyed choices: one radio per key; the models of the chosen key below it.
 function keyed(kind, groups, selected, { swatches = false, compare = null } = {}) {
   const html = [];
@@ -37,7 +69,9 @@ function keyed(kind, groups, selected, { swatches = false, compare = null } = {}
     const active = defs.find((d) => d.id === selected);
     const def = active || defs[0];
     html.push(choice(kind, def.id, def.label, Boolean(active), swatches ? swatchOf(def) : null));
-    if (active && defs.length > 1) {
+    if (active && active.kind === 'classes') {
+      html.push(classChoices(kind, defs, active, compare && compare.id ? compare : null));
+    } else if (active && defs.length > 1) {
       html.push(models(kind, defs, active.id));
       if (compare) {
         const options = [`<option value="">—</option>`, ...defs.filter((d) => d.id !== active.id)
@@ -53,7 +87,7 @@ export function buildPanel(el, catalogue, state, years, extra, on) {
   const html = [];
   // ---- surface ----
   html.push('<h3 style="margin-top:6px;border-top:0;padding-top:0">Surface</h3>');
-  const fields = catalogue.surfaces.filter((s) => s.kind === 'field');
+  const fields = catalogue.surfaces.filter((s) => s.kind === 'field' || s.kind === 'classes');
   const indicators = catalogue.surfaces.filter((s) => s.kind === 'indicator');
   const compare = catalogue.surfaces.find((s) => s.id === state.compare) || null;
   const byDomain = new Map();

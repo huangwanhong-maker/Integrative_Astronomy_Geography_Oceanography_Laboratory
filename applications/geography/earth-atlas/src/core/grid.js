@@ -81,6 +81,9 @@ export class FieldProduct {
     this.variables = new Map(meta.variables.map((v) => [v.name, v]));
     this.cache = new Map();
     this.cacheLimit = 48;
+    // A climatology describes a typical year: its times are the months of one
+    // year (meta.climatology.year), and any instant is shown by its month.
+    this.climatology = meta.climatology || null;
   }
 
   has(name) { return this.variables.has(name); }
@@ -105,6 +108,10 @@ export class FieldProduct {
   }
 
   bracket(ms, name) {
+    if (this.climatology && this.times.length === 12) {
+      const i = new Date(ms).getUTCMonth();
+      return { i0: i, i1: i, w: 0, shown: this.times[i], offset: 0, month: i };
+    }
     const v = name && this.variables.get(name);
     const nearest = Boolean(v && v.cell_methods && /time:\s*(mean|sum|maximum|minimum)/.test(v.cell_methods));
     return timeBracket(this.times, ms, nearest);
@@ -195,4 +202,37 @@ export function areaMean(values, grid) {
     }
   }
   return weight > 0 ? sum / weight : NaN;
+}
+
+// A class product: a category per cell (data/products/class_raster.py), on a
+// grid like a field's. Classes are not interpolated: a place takes the class of
+// the cell that contains it. values: Uint8Array, 0 for no value.
+export class ClassRaster {
+  constructor(meta, values) {
+    this.meta = meta;
+    this.grid = meta.grid;
+    this.values = values instanceof Uint8Array ? values : new Uint8Array(values);
+    this.classes = new Map(meta.classes.map((c) => [c.value, c]));
+  }
+
+  // The index of the cell containing a place, or -1 outside the grid.
+  cell(lon, lat) {
+    const g = this.grid;
+    let c = Math.round((lon - g.lon0) / g.dlon);
+    if (g.periodic) c = ((c % g.nlon) + g.nlon) % g.nlon;
+    else if (c < 0 || c >= g.nlon) return -1;
+    const r = Math.round((g.lat0 - lat) / g.dlat);
+    if (r < 0 || r >= g.nlat) return -1;
+    return r * g.nlon + c;
+  }
+
+  valueAt(lon, lat) {
+    const k = this.cell(lon, lat);
+    return k < 0 ? 0 : this.values[k];
+  }
+
+  // The class at a place ({ value, code, name, colour }), or null.
+  classAt(lon, lat) {
+    return this.classes.get(this.valueAt(lon, lat)) || null;
+  }
 }

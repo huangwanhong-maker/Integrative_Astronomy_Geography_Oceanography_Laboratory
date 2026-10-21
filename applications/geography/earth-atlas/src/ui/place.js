@@ -35,7 +35,7 @@ function sparkline(lines) {
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${svg}</svg>`;
 }
 
-// info: { title, sub, pinned, rows: [[term, html]], sections: [{ heading, rows }],
+// info: { title, sub, pinned, rows: [[term, html]], sections: [{ heading, rows, figure }],
 //         series: [{ label, now, lines }], models: [{ model, colour }], hint }
 export function renderPlace(el, info) {
   const rows = (list) => `<dl>${list.map(([dt, dd, kind]) => `<dt${kind ? ` class="${kind}"` : ''}>${esc(dt)}</dt><dd${kind ? ` class="${kind}"` : ''}>${dd}</dd>`).join('')}</dl>`;
@@ -45,8 +45,9 @@ export function renderPlace(el, info) {
   if (info.sub) html += `<p class="sub">${esc(info.sub)}</p>`;
   if (info.rows && info.rows.length) html += rows(info.rows);
   for (const s of info.sections || []) {
-    if (!s.rows.length) continue;
+    if (!s.rows.length && !s.figure) continue;
     html += `<h4>${esc(s.heading)}</h4>${rows(s.rows)}`;
+    if (s.figure) html += `<figure>${s.figure.svg}${s.figure.caption ? `<figcaption>${esc(s.figure.caption)}</figcaption>` : ''}</figure>`;
   }
   if (info.series && info.series.length) {
     html += '<h4>Over time</h4>';

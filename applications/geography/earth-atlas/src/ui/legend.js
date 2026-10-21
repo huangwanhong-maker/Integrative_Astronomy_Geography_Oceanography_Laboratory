@@ -13,7 +13,22 @@ function tickText(v) {
 
 export function renderLegend(el, { surface, flow, lines, events }) {
   const parts = [];
-  if (surface) {
+  if (surface && surface.kind === 'classes') {
+    // One column per main class (A tropical, B arid, C temperate, D cold, E polar).
+    const groups = new Map();
+    for (const c of surface.classes) {
+      const g = c.code[0];
+      if (!groups.has(g)) groups.set(g, []);
+      groups.get(g).push(c);
+    }
+    const columns = [...groups.values()].map((list) => `<div>${list.map((c) =>
+      `<span title="${esc(c.name)}"><i style="background:${c.colour}"></i>${esc(c.code)}</span>`).join('')}</div>`).join('');
+    parts.push(`<div>
+      <div class="title"><span>${esc(surface.title)}</span></div>
+      <div class="classes">${columns}</div>
+      ${surface.note ? `<div class="note">${esc(surface.note)}</div>` : ''}
+    </div>`);
+  } else if (surface) {
     const ticks = surface.ticks.map((t) => `<span style="left:${(t.at * 100).toFixed(2)}%">${esc(tickText(t.value))}</span>`).join('');
     parts.push(`<div>
       <div class="title"><span>${esc(surface.title)}</span><span class="unit">${esc(surface.unit)}</span></div>

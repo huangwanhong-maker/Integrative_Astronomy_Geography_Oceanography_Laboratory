@@ -2,7 +2,8 @@
 //
 // Layers are typed by the shape of their data, not by subject:
 //   surface  a quantity over the whole surface: a field (one variable, or the
-//            speed of a vector field) or a value per country (an indicator);
+//            speed of a vector field), a value per country (an indicator), or
+//            a class per cell (climate classes, by period and scenario);
 //   flow     a vector field shown by moving particles;
 //   lines    isolines of a field, with its highs and lows;
 //   events   things that happened at places and instants.
@@ -13,6 +14,9 @@
 // two of them can be compared as a difference. A variable that is not
 // recognised is still offered, with a range taken from its own values: new
 // data, such as our own model output, can be seen as soon as it is a product.
+//
+// A climatology (monthly normals) is offered as surfaces that follow the month
+// of the time shown, and feeds the place card's climate diagram.
 //
 // Styles (colour map, range, scale) live here, in the application, and not in
 // the data. Ranges are in the units shown (src/core/units.js); `ranges` gives
@@ -45,6 +49,16 @@ const QUANTITIES = [
   { id: 'wind-sea-period', standard: 'sea_surface_wind_wave_period', label: 'Wind-sea period', colormap: 'speed', reverse: true, range: [1, 12] },
   { id: 'elevation', standard: 'altitude', label: 'Elevation', base: true },
 ];
+
+// Monthly normals of a climatology, recognised by standard name and cell methods.
+const NORMALS = [
+  { id: 'tmax', match: (v) => v.standard_name === 'air_temperature' && /maximum within days/.test(v.cell_methods || ''), label: 'Daily maximum temperature', colormap: 'thermal', range: [-35, 45] },
+  { id: 'tmin', match: (v) => v.standard_name === 'air_temperature' && /minimum within days/.test(v.cell_methods || ''), label: 'Daily minimum temperature', colormap: 'thermal', range: [-45, 30] },
+  { id: 'ppt', match: (v) => v.standard_name === 'precipitation_amount', label: 'Precipitation in the month', colormap: 'haline', range: [2, 500], scale: 'log', fade: 0.15 },
+];
+
+// Names of series of class maps.
+const CLASS_SERIES = { 'koppen-geiger': 'Climate classes (Köppen–Geiger)' };
 
 const VECTORS = [
   { id: 'wind', standard: 'wind', label: 'Wind', colormap: 'orchid', range: [0, 25], ranges: { '850 hPa': [0, 35], '500 hPa': [0, 50], '250 hPa': [0, 80] } },
@@ -95,11 +109,41 @@ function source(meta) {
   return { dataset: s.dataset, profile: s.profile, provider: s.provider, licence: s.licence, citation: s.citation, retrieved: s.retrieved_at, credit: s.credit };
 }
 
+const periodText = (p) => `${p[0]}–${p[1]}`;
+
+// Class maps of one series: the present first, then by period and scenario.
+function classSurfaces(library) {
+  const out = [];
+  for (const [name, meta] of library.classMeta) {
+    const period = periodText(meta.period);
+    out.push({ id: `classes:${name}`, key: `classes:${meta.series}`, kind: 'classes', label: CLASS_SERIES[meta.series] || meta.title,
+      model: meta.computed ? `${period}, ${meta.model}` : meta.scenario ? `${period}, ${meta.scenario}` : period,
+      period: meta.period, scenario: meta.scenario || null, computed: Boolean(meta.computed), product: name,
+      domain: meta.domain || 'climate', sourceName: meta.computed ? meta.model : `the map of ${(meta.source && meta.source.credit || '').split(',').slice(1, 2).join('').trim() || meta.title}` });
+  }
+  const present = (d) => (d.period[1] === 2020 && !d.computed ? 0 : 1);
+  return out.sort((a, b) => present(a) - present(b) || a.period[0] - b.period[0] || (a.scenario || '').localeCompare(b.scenario || '') || a.computed - b.computed);
+}
+
 export function buildCatalogue(library) {
-  const surfaces = [], flows = [], lines = [], events = [], probes = [], clouds = [];
+  const surfaces = [], flows = [], lines = [], events = [], probes = [], clouds = [], normals = [];
+  surfaces.push(...classSurfaces(library));
   for (const [name, meta] of library.fieldMeta) {
     const domain = meta.domain || 'geography';
     const model = meta.model || meta.title;
+    if (meta.climatology) {
+      const found = {};
+      for (const v of meta.variables) {
+        const known = NORMALS.find((q) => q.match(v));
+        if (!known) continue;
+        found[known.id] = v.name;
+        surfaces.push({ id: `normal:${known.id}@${name}`, key: `normal:${known.id}`, kind: 'field', label: `${known.label}, normal`, model, product: name,
+          variables: [v.name], domain: 'climate', units: v.units, level: '', climatology: meta.climatology, source: source(meta),
+          style: { colormap: known.colormap, range: known.range, scale: known.scale || 'linear', fade: known.fade } });
+      }
+      if (found.tmax && found.tmin && found.ppt) normals.push({ product: name, model, period: meta.climatology.period, variables: found });
+      continue;
+    }
     const taken = new Set();
     for (const vec of meta.vectors || []) {
       const known = VECTORS.find((k) => k.standard === vec.standard_name) || { id: vec.name, label: capital(vec.name.replace(/_/g, ' ')), colormap: 'orchid', range: [0, 20] };
@@ -174,7 +218,7 @@ export function buildCatalogue(library) {
   flows.sort((a, b) => flowRank(a) - flowRank(b) || modelRank(a.model) - modelRank(b.model));
   lines.sort((a, b) => a.key.localeCompare(b.key) || modelRank(a.model) - modelRank(b.model));
   clouds.sort((a, b) => modelRank(a.model) - modelRank(b.model));
-  return { surfaces, flows, lines, events, probes, clouds };
+  return { surfaces, flows, lines, events, probes, clouds, normals };
 }
 
 // Definitions grouped by key, in catalogue order: [[key, [defs by model]]].

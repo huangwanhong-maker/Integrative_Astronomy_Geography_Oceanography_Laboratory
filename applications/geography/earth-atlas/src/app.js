@@ -26,7 +26,9 @@ import { toVector } from './core/sphere.js';
 import { subsolarPoint, sunAltAz, daylight, localMeanSolarTime } from './core/sun.js';
 import { windFromDirection, compassPoint } from './core/derived.js';
 import { displayUnit, toShown, format } from './core/units.js';
-import { areaMean } from './core/grid.js';
+import { areaMean, ClassRaster } from './core/grid.js';
+import { koppen, koppenGrid, meanTemperature } from './core/climate.js';
+import { climateDiagram } from './ui/climate.js';
 import { joinCountries, valueForYear, latestWellCoveredYear } from './core/join.js';
 
 const $ = (id) => document.getElementById(id);
@@ -48,6 +50,8 @@ let imagery, detail, labModel;
 const lab = { input: null, running: false, progress: 0, verification: null, against: '', error: '' };
 const MODEL_COLOURS = ['#CA8DBE', '#f6c47e', '#9fb6e8', '#8fd1b4', '#e8a0a0'];
 const loaded = new Map();          // field products in memory, by name
+const classMaps = new Map();       // class products in memory, by name
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const indicators = new Map();      // indicator products, by name, with their joins
 let hover = null;
 let dirty = { labels: true, legend: true, place: true };
@@ -139,6 +143,31 @@ async function start() {
   // The rest of the data, for the place card.
   for (const [name] of library.fieldMeta) track(name);
   for (const e of library.list('indicators')) loadIndicator(e.name);
+  const present = presentClasses();
+  if (present) library.classes(present.product).then((r) => { classMaps.set(present.product, r); dirty.place = true; });
+  // Our own classification of the climate normals, offered beside the published maps.
+  const normals = catalogue.normals[0];
+  if (normals && present) track(normals.product).then((p) => addOurClasses(normals, p, present));
+}
+
+// The published map of climate classes for the present period (1991-2020).
+function presentClasses() {
+  return catalogue.surfaces.find((d) => d.kind === 'classes' && !d.computed && !d.scenario && d.period[1] === 2020) || null;
+}
+
+function addOurClasses(normals, p, present) {
+  const months = [...Array(12).keys()], v = normals.variables;
+  const values = koppenGrid(months.map((i) => p.slice(v.tmax, i)), months.map((i) => p.slice(v.tmin, i)), months.map((i) => p.slice(v.ppt, i)));
+  const ref = library.classMeta.get(present.product);
+  const period = normals.period.split('/').map((d) => Number(d.slice(0, 4)));
+  library.addClasses(new ClassRaster({
+    name: `${ref.series}-laboratory`, title: `${ref.title.split(',')[0]}, classified here from ${normals.model} normals`,
+    series: ref.series, period, scenario: null, computed: true, model: `ours, from ${normals.model}`, domain: ref.domain,
+    grid: p.grid, classes: ref.classes, no_value: 0,
+    source: { credit: `classified here from ${p.meta.source.credit}` },
+  }, values));
+  catalogue = buildCatalogue(library);
+  renderPanel();
 }
 
 function track(name) {
@@ -303,7 +332,7 @@ function timeDomain() {
       if (!steps.length) steps.push(...product.times);
     }
   };
-  if (surface.def && surface.def.kind === 'field') add(surface.product);
+  if (surface.def && surface.def.kind === 'field' && surface.product && !surface.product.climatology) add(surface.product);
   add(flow.product);
   add(lines.product);
   if (events.product) domains.push(events.window());
@@ -437,6 +466,12 @@ function showTooltip() {
 function surfaceValueText(lon, lat) {
   const def = surface.def;
   if (!def || !surface.product) return '';
+  if (def.kind === 'classes') {
+    const c = surface.classesAt(lon, lat);
+    if (!c || !c.now) return '';
+    const then = c.then ? ` <span class="n">${c.then.code === c.now.code ? 'unchanged' : `was ${esc(c.then.code)}`}</span>` : '';
+    return `${esc(c.now.code)} <span class="n">${esc(c.now.name)}</span>${then}`;
+  }
   if (def.kind === 'indicator') {
     const i = base.countryAt(lon, lat);
     const v = i >= 0 && surface.values && surface.values[i];
@@ -594,6 +629,8 @@ function placeCard() {
       series.push({ label: main.probe.kind === 'vector' ? `${main.probe.label} speed` : main.probe.label, now: main.text.replace(/ <span.*$/, ''), lines });
     }
   }
+  const climate = climateAt(lon, lat);
+  for (const [term, html, kind] of climate.rows) add('climate', term, html, kind);
   const palette = [...models].sort((a, b) => modelRank(a) - modelRank(b));
   for (const s2 of series) for (const l of s2.lines) l.colour = MODEL_COLOURS[palette.indexOf(l.model) % MODEL_COLOURS.length];
   const order = ['meteorology', 'oceanography', 'climate', 'geography', 'geophysics'].map((d) => DOMAINS[d]);
@@ -619,10 +656,42 @@ function placeCard() {
     sub: sub2,
     pinned: true,
     rows,
-    sections: ordered.map(([heading, r]) => ({ heading, rows: r })),
+    sections: ordered.map(([heading, r]) => ({ heading, rows: r, figure: heading === DOMAINS.climate ? climate.figure : null })),
     series,
     models: palette.length > 1 ? palette.map((m, i) => ({ model: m, colour: MODEL_COLOURS[i % MODEL_COLOURS.length] })) : null,
   };
+}
+
+// The climate of a place: its class in the present and in the period shown,
+// and its normal year, as figures and as a climate diagram.
+function climateAt(lon, lat) {
+  const rows = [];
+  let figure = null;
+  // The code in the row; the class's name beneath, across the card.
+  const classRow = (term, c) => rows.push([term, `<span class="code">${esc(c.code)}</span>`], ['', esc(c.name), 'gloss']);
+  const present = presentClasses();
+  const now = present && classMaps.get(present.product);
+  const c0 = now && now.classAt(lon, lat);
+  if (c0) classRow(`Climate class, ${present.model}`, c0);
+  if (surface.def && surface.def.kind === 'classes' && surface.product && surface.product !== now) {
+    const c = surface.product.classAt(lon, lat);
+    if (c) classRow(`Climate class, ${surface.def.model}`, c);
+  }
+  const n = catalogue.normals[0], p = n && loaded.get(n.product);
+  if (p) {
+    const at = (v) => [...Array(12).keys()].map((i) => p.sample(v, Date.UTC(p.climatology.year, i, 15), lon, lat));
+    const tmax = at(n.variables.tmax), tmin = at(n.variables.tmin), P = at(n.variables.ppt);
+    if ([...tmax, ...tmin, ...P].every(Number.isFinite)) {
+      const T = meanTemperature(tmax, tmin);
+      const code = koppen(T, P);
+      rows.push(['Mean temperature, year', `${format(T.reduce((a, b) => a + b, 0) / 12)} °C`]);
+      rows.push(['Precipitation, year', `${format(P.reduce((a, b) => a + b, 0))} mm`]);
+      if (code && (!c0 || c0.code !== code)) rows.push(['Class of these normals', `<span class="code">${esc(code)}</span>`]);
+      const [a, b] = n.period.split('/').map((d) => d.slice(0, 4));
+      figure = { svg: climateDiagram({ T, P, Tmin: tmin, lat }), caption: `${n.model}, ${a}–${b}: temperature and precipitation by month, after Walter and Lieth` };
+    }
+  }
+  return { rows, figure };
 }
 
 // ---- legend, labels, credits, about ---------------------------------------------
@@ -632,7 +701,14 @@ function legendData() {
   const lg = surface.legend();
   if (lg) {
     const def = surface.def;
-    if (def.kind === 'field') {
+    if (def.kind === 'classes') {
+      const credit = surface.product.meta.source && surface.product.meta.source.credit;
+      lg.note = [credit, surface.compare ? 'faint where the class is the same' : '0.1° cells'].filter(Boolean).join(' · ');
+    } else if (def.kind === 'field' && surface.product.climatology) {
+      const p = surface.product, b = p.bracket(state.time);
+      lg.title = `${def.label.replace(/, normal$/, '').replace(/ in the month$/, '')} in ${MONTH_NAMES[b.month]}, normal`;
+      lg.note = [p.meta.source && p.meta.source.credit, `the normal year of ${p.climatology.period.slice(0, 4)}–${p.climatology.period.slice(11, 15)}`].filter(Boolean).join(' · ');
+    } else if (def.kind === 'field') {
       const p = surface.product, b = surface.shown || p.bracket(state.time);
       const credit = [p.meta.source && p.meta.source.credit, surface.compare && surface.compare.product.meta.source.credit].filter(Boolean).join(' · ');
       const when = p.times.length ? (b.offset ? formatShortUTC(b.shown) : 'interpolated in time') : '';
@@ -676,6 +752,9 @@ function updateCredits() {
   if (state.lights && imagery && imagery.entry('night-lights')) credits.add('NASA Black Marble');
   if (state.clouds && catalogue.clouds.length) credits.add(`clouds: ${catalogue.clouds[0].model}`);
   if (surface.def && surface.def.kind === 'indicator' && surface.product) credits.add(surface.product.source.credit);
+  if (surface.def && surface.def.kind === 'classes' && surface.product) {
+    for (const r of [surface.product, surface.compare && surface.compare.product]) if (r && r.meta.source) credits.add(r.meta.source.credit);
+  }
   if (events.product) credits.add(events.product.source.credit);
   $('credits').textContent = [...credits].filter(Boolean).join(' · ');
 }
@@ -707,7 +786,14 @@ function renderAbout() {
   if (ind.length) add(`Indicators by country (${ind.length})`, { ...ind[0].source, licence: 'CC BY 4.0' });
   for (const e of library.list('events')) add(e.title, e.source);
   for (const e of library.list('imagery')) add(e.title, { ...e.source, provider: `${e.layer}${e.date ? `, ${e.date}` : ''}` });
+  const series = new Set();
+  for (const [, m] of library.classMeta) {
+    if (m.computed || series.has(m.series)) continue;
+    series.add(m.series);
+    add(`${m.title.split(',')[0]}, ${[...library.classMeta.values()].filter((x) => x.series === m.series && !x.computed).length} maps`, m.source);
+  }
   if (lab.input) rows.push(`<dt>Laboratory model</dt><dd>The barotropic vorticity equation at 500 hPa, as in the first numerical forecast (Charney, Fjørtoft and von Neumann 1950), solved by the spectral transform method at triangular truncation T42 (a Gaussian grid of 128 × 64) with fourth-order Runge–Kutta steps of 30 min. It starts from the 500 hPa wind of the GFS; heights follow from the stream function by linear balance and are added, as changes, to the analysed height. Tested against the Rossby–Haurwitz wave, an exact solution.</dd>`);
+  if (catalogue.normals.length) rows.push(`<dt>Climate</dt><dd>Climate classes follow Köppen (1936) as revised by Peel et al. (2007) and Beck et al. (2018): the arid group first, then the tropical, polar, temperate and cold groups, with summer the warmer half-year. Besides the published maps, the atlas classifies the ${esc(catalogue.normals[0].model)} normals itself, with the mean temperature of a month taken as the mean of its daily maximum and minimum; the two agree in about nine land cells in ten. Climate diagrams follow Walter and Lieth (1960): 10 °C to 20 mm, dry where precipitation falls below twice the temperature (Gaussen).</dd>`);
   rows.push(`<dt>Method</dt><dd>Fields are interpolated bilinearly in space and linearly in time between the stored steps; a place near missing values takes the mean of the valid neighbours carrying at least half the weight. Wind direction is the direction it comes from. Wave energy travels at the deep-water group speed g T / 4π along the peak direction. The Sun's position follows the Astronomical Almanac's low-precision formulas (0.01°); day, civil, nautical and astronomical twilight are drawn as bands. Countries are joined to indicators by their World Bank and ISO codes; boundaries are Natural Earth's de facto depiction. The Equal Earth projection keeps areas true.</dd>`);
   $('about-body').innerHTML = `<dl>${rows.join('')}</dl>`;
 }
@@ -782,7 +868,7 @@ function remember() {
 
 function restore() {
   const q = new URLSearchParams(location.hash.slice(1));
-  if (q.get('p')) state.projection = q.get('p');
+  if (['globe', 'equal-earth', 'equirectangular'].includes(q.get('p'))) state.projection = q.get('p');
   if (q.get('c')) {
     const [lon, lat, dist] = q.get('c').split(',').map(Number);
     if ([lon, lat, dist].every(Number.isFinite)) {

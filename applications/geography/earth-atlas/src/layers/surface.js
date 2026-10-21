@@ -1,9 +1,11 @@
 // The surface layer: one quantity over the whole surface, as a field, as the
 // difference of two models' fields, or as a value per country, coloured by a
-// colour map.
+// colour map; or a class per cell (climate classes), alone or as the changes
+// from another period.
 
 import { lookupTable, colourAt, cssGradient } from '../render/colormaps.js';
-import { FieldTextures, setField, setLut, setCountryColours } from '../render/surface.js';
+import { FieldTextures, setField, setLut, setCountryColours, classTexture, setClasses } from '../render/surface.js';
+import { classColours, soften, cssColour } from '../render/classes.js';
 import { displayUnit, toShown, toStored } from '../core/units.js';
 import { joinCountries, valueForYear, latestWellCoveredYear } from '../core/join.js';
 
@@ -53,6 +55,7 @@ export class SurfaceLayer {
     this.library = library;
     this.countries = countries;        // the geography product's countries
     this.textures = new FieldTextures();
+    this.classTextures = new Map();
     this.def = null;
     this.product = null;
     this.info = null;
@@ -66,6 +69,16 @@ export class SurfaceLayer {
     this.product = null;
     const u = this.stage.material.uniforms;
     if (!def) { u.uMode.value = 0; return; }
+    if (def.kind === 'classes') {
+      const other = compare && compare.kind === 'classes';
+      const [a, b] = await Promise.all([this.library.classes(def.product), other ? this.library.classes(compare.product) : null]);
+      if (this.def !== def) return;
+      this.product = a;
+      this.compare = b ? { def: compare, product: b } : null;
+      setClasses(this.stage.material, this.classTexture(a), a, classColours(a.meta.classes),
+        b ? { raster: b, texture: this.classTexture(b) } : null);
+      return;
+    }
     if (def.kind === 'field' && compare && compare.kind === 'field' && !def.variables[1]) {
       const [a, b] = await Promise.all([this.library.field(def.product), this.library.field(compare.product)]);
       if (this.def !== def) return;
@@ -166,10 +179,39 @@ export class SurfaceLayer {
     this.paintCountries();
   }
 
+  // An integer texture for a class map, kept for a few maps.
+  classTexture(raster) {
+    const name = raster.meta.name;
+    let t = this.classTextures.get(name);
+    if (!t) {
+      t = classTexture(raster);
+      this.classTextures.set(name, t);
+      if (this.classTextures.size > 4) {
+        const [k, old] = this.classTextures.entries().next().value;
+        if (old !== this.stage.material.uniforms.uK0.value && old !== this.stage.material.uniforms.uK1.value) {
+          this.classTextures.delete(k);
+          old.dispose();
+        }
+      }
+    }
+    return t;
+  }
+
+  samePeriod(other) {
+    return other.period && this.def.period && other.period[0] === this.def.period[0] && other.period[1] === this.def.period[1];
+  }
+
+  // The class at a place, and the other map's class there when comparing.
+  classesAt(lon, lat) {
+    if (!this.def || this.def.kind !== 'classes' || !this.product) return null;
+    return { now: this.product.classAt(lon, lat), then: this.compare ? this.compare.product.classAt(lon, lat) : null };
+  }
+
   // Points the GPU at the data for an instant; returns what is shown.
   update(time) {
     if (!this.def || !this.product) return null;
     if (this.def.kind === 'indicator') return { year: this.year };
+    if (this.def.kind === 'classes') return null;
     const b = this.product.bracket(time, this.def.variables[0]);
     const second = this.compare && {
       product: this.compare.product, name: this.compare.def.variables[0],
@@ -191,6 +233,15 @@ export class SurfaceLayer {
 
   legend() {
     if (!this.def || !this.product) return null;
+    if (this.def.kind === 'classes') {
+      const c = this.compare;
+      return {
+        kind: 'classes',
+        title: c ? `${this.def.label}: ${this.def.model}, where it differs from ${this.samePeriod(c.def) ? c.def.sourceName : c.def.model}` : `${this.def.label}, ${this.def.model}`,
+        unit: '',
+        classes: this.product.meta.classes.map((k) => ({ code: k.code, name: k.name, colour: cssColour(soften(k.colour)) })),
+      };
+    }
     const st = this.compare ? { colormap: 'balance' } : this.def.style;
     return {
       title: this.compare ? `${this.def.label}: ${this.def.model} minus ${this.compare.def.model}` : this.def.label,
