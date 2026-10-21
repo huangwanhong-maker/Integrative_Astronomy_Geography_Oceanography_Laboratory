@@ -2,6 +2,13 @@
 
 This is a long-term programme to learn, use and research astronomy, geography, oceanography and meteorology as one connected body of knowledge, in both theory and practice. Geometry, mathematics and physics form the shared foundation.
 
+<p align="center">
+<a href="docs/gallery.md"><img src="assets/gallery/earth-01-wind.jpg" width="32%" alt="Wind over the North Atlantic in the Earth Atlas"></a>
+<a href="docs/gallery.md"><img src="assets/gallery/earth-08-koppen.jpg" width="32%" alt="Köppen–Geiger climate classes over Asia in the Earth Atlas"></a>
+<a href="docs/gallery.md"><img src="assets/gallery/celestial-02-saturn.jpg" width="32%" alt="Saturn in the Celestial Atlas"></a>
+</p>
+<p align="center"><i>The Earth Atlas and the Celestial Atlas: see the <a href="docs/gallery.md">gallery</a>.</i></p>
+
 ## Abstract
 
 **English.** This project studies astronomy, geography, oceanography and meteorology as one connected body of knowledge, in theory and in practice. Geometry, mathematics and physics form their shared foundation. The fields share spherical geometry, coordinate systems, the rotation group, potential theory, harmonic analysis and the dynamics of rotating, stratified fluids. They meet in concrete phenomena: tides, navigation, the figure and mapping of the Earth, the coupled exchange between ocean and atmosphere, and the astronomical forcing of climate. New ideas will keep emerging and evolving, so the project is designed throughout to be modular, extensible and revisable.
@@ -133,7 +140,7 @@ For more detail:
 ├── theory/                notes on fields and bridges
 ├── notebooks/             exploration and teaching
 ├── research/              questions · experiments · papers
-├── docs/                  architecture
+├── docs/                  architecture · gallery
 ├── development/           ideas · decisions · roadmap
 └── assets/                images · fonts · style tokens
 ```
@@ -148,9 +155,12 @@ Every directory has a README describing its purpose and planned modules. [`CLAUD
 
 ## 5. Status
 
-**Foundational stage (2026-10-22).** The architecture is designed, and the four repositories are scaffolded and published. There is no code yet.
+**Early working stage (2026-10-22).** The architecture is designed, and the four repositories are scaffolded and published. Two applications work; their computation is provisional JavaScript, tested against published references. The [gallery](docs/gallery.md) shows both.
 
-The next step is Phase 0 of the [roadmap](development/roadmap.md): the toolchain and the build.
+- The [Celestial Atlas](applications/astronomy/celestial-atlas/README.md) shows the Sun, the Moon, the planets, the stars and the galaxies, at any instant from 1849 to 2150. It has 61 checks.
+- The [Earth Atlas](applications/geography/earth-atlas/README.md) shows weather, ocean, climate, relief and people on one globe, including forecasts from two models of the laboratory's own. It has 105 checks.
+
+There is no C++ code yet. The next step is Phase 0 of the [roadmap](development/roadmap.md): the toolchain and the build.
 
 ## 6. License
 

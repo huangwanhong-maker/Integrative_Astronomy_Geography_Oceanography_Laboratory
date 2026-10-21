@@ -212,7 +212,7 @@ These conventions are shared with all three libraries.
 ├── theory/                notes on fields and bridges (ADR 0006, 0008)
 ├── notebooks/             exploration and teaching
 ├── research/              questions · experiments · papers
-├── docs/                  architecture (later: glossary · references)
+├── docs/                  architecture · gallery (later: glossary · references)
 ├── development/           ideas · decisions · roadmap (ADR 0009)
 └── assets/                images · fonts · style tokens
 ```
