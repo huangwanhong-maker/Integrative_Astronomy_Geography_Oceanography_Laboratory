@@ -14,6 +14,7 @@ import {
 } from '../src/core/frames.js';
 import { osculating } from '../src/core/kepler.js';
 import { bodyFixedMatrix } from '../src/core/rotation.js';
+import { tilesFor } from '../src/core/tiles.js';
 import { GM_SUN } from '../src/core/bodies.js';
 import { ICRS_TO_SUPERGALACTIC } from '../src/core/frames.js';
 import {
@@ -224,6 +225,35 @@ if (existsSync(UNGC)) {
   const cases = [['MESSIER081', 'M 81'], ['NGC0253', 'NGC 253'], ['ESO499-037', 'ESO 499-037'],
     ['UGCA086', 'UGCA 86'], ['KKH011', 'KKH 11'], ['Milky Way', 'Milky Way'], ['And XXX', 'And XXX']];
   check('display names', cases.filter(([a, b]) => displayName(a) !== b).length, 0, 'mismatches');
+}
+
+// 10. Tiles of the Trek map services, for detail at close range: the tiles chosen
+// cover the region asked for, at a level no coarser than needed (unless the
+// count of tiles forbids it), and never more than the limit.
+{
+  const live = { tile: 256, levels: 8 };
+  let uncovered = 0, tooMany = 0, coarse = 0;
+  let seed = 9;
+  const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+  for (let k = 0; k < 2000; k++) {
+    const width = 1 + 200 * rnd() ** 2, height = Math.min(170, 1 + 120 * rnd() ** 2);
+    const west = -180 + (360 - Math.min(width, 359)) * rnd(), south = -90 + (180 - height) * rnd();
+    const box = [west, south, Math.min(width, 180 - west), height];
+    const ppd = 2 + 600 * rnd() ** 3;
+    const t = tilesFor(box, ppd, live);
+    const [w, s, cw, ch] = t.box;
+    if (w > box[0] + 1e-9 || s > box[1] + 1e-9 || w + cw < box[0] + box[2] - 1e-9 || s + ch < box[1] + box[3] - 1e-9) uncovered++;
+    if ((t.c1 - t.c0 + 1) * (t.r1 - t.r0 + 1) > 48 && t.z > 0) tooMany++;
+    const needed = Math.min(live.levels, Math.max(0, Math.ceil(Math.log2((ppd * 360) / 512))));
+    if (t.z < needed && tilesFor(box, ppd, live, Infinity).z === t.z) coarse++;
+    if (t.z === needed && needed < live.levels && (2 ** (t.z + 1) * 256) / 360 < ppd * 0.999) coarse++;
+  }
+  check('tiles cover the region asked for (2000 regions)', uncovered, 0, 'regions');
+  check('tiles: never more than 48', tooMany, 0, 'regions');
+  check('tiles: the level is the one needed, or limited by the count', coarse, 0, 'regions');
+  const t = tilesFor([-10, -5, 20, 10], 100, live);
+  check('tiles: 20 x 10 degrees at 100 pixels per degree is level 6, 8 x 4 tiles',
+    Math.abs(t.z - 6) + Math.abs(t.c1 - t.c0 + 1 - 8) + Math.abs(t.r1 - t.r0 + 1 - 4), 0, '');
 }
 
 console.log(failures ? `\n${failures} check(s) failed` : '\nall checks passed');

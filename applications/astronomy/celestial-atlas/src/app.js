@@ -835,6 +835,8 @@ async function main() {
   applyOptions();
   showView(state.view);
   $('#loading').hidden = true;
+  // For inspection from the browser's console and for automated checks.
+  window.celestial = { state, views, selectBody, showView, applyOptions };
   requestAnimationFrame(frame);
 }
 

@@ -1,6 +1,6 @@
 # 0016. Maps of the Bodies, IAU Rotation, and Imagery Shared Across Applications
 
-- **Status:** Accepted, provisionally: built while the user was away; open to revision on review.
+- **Status:** Accepted, provisionally: built while the user was away; open to revision on review. Amended by [ADR 0020](0020-detail-of-bodies-at-close-range.md) (detail at close range).
 - **Date:** 2026-10-22
 - **Decided by:** the user asked for finer textures in the 3D views of both atlases. Claude chose the design below.
 

@@ -38,6 +38,13 @@ TYPES = {
 }
 
 
+class Server(http.server.ThreadingHTTPServer):
+    # A page asks for its modules, maps and data at once: a deeper queue than
+    # the default of five keeps the connections from being refused.
+    request_queue_size = 128
+    daemon_threads = True
+
+
 class Handler(http.server.SimpleHTTPRequestHandler):
     extensions_map = {**http.server.SimpleHTTPRequestHandler.extensions_map, **TYPES}
 
@@ -50,7 +57,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         return str(target)
 
     def end_headers(self) -> None:
-        if self.path.startswith("/data/"):
+        # Fixed downloads (the ephemeris) are kept for a day; products, which
+        # change when rebuilt, are checked again each time (a 304 if unchanged).
+        if self.path.startswith("/data/") and not self.path.startswith("/data/products/"):
             self.send_header("Cache-Control", "public, max-age=86400")
         else:
             self.send_header("Cache-Control", "no-cache")
@@ -69,7 +78,7 @@ def main(argv: list[str]) -> int:
     if not (DATA / "jpl-de440s" / "de440s.bsp").exists():
         print("The data cache is empty. From the repository root, run:\n"
               "  python data/acquisition/fetch.py\n  python data/products/star_catalog.py", file=sys.stderr)
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    server = Server(("127.0.0.1", args.port), Handler)
     url = f"http://127.0.0.1:{args.port}/"
     print(f"Celestial Atlas at {url}  (Ctrl+C to stop)", flush=True)
     if args.open:

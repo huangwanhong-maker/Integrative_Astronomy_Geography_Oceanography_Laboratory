@@ -17,6 +17,7 @@ import { BODIES, BY_KEY } from '../core/bodies.js';
 import { AU_KM, ICRS_TO_ECLIPTIC, ICRS_TO_GALACTIC, apply, multiply, transpose, sub } from '../core/frames.js';
 import { bodyFixedMatrix } from '../core/rotation.js';
 import { BODY_FROM_LOCAL, quaternionOf, skyRotation, skySphere, nightLights } from '../render/maps.js';
+import { BodyDetail } from '../render/detail.js';
 import { osculatingOrbit } from '../core/sky.js';
 import { starPoints, magnitudeStyle } from '../render/points.js';
 import { starRgb } from '../render/colour.js';
@@ -104,7 +105,8 @@ export class SolarSystemView {
   }
 
   buildBodies() {
-    const sphere = new THREE.SphereGeometry(1, 64, 32);
+    // Fine enough that the limb stays round when a body fills the view.
+    const sphere = new THREE.SphereGeometry(1, 192, 96);
     for (const b of BODIES) {
       const group = new THREE.Group();
       const material = b.key === 'sun'
@@ -250,6 +252,11 @@ export class SolarSystemView {
       }
       m.needsUpdate = true;
     }
+    // Finer maps of the Moon, Mars and Mercury, fetched when one fills the view.
+    this.detail = new BodyDetail(this.renderer);
+    for (const [key, live] of Object.entries(maps.live || {})) {
+      if (this.items[key] && this.items[key].mesh.material.map) this.detail.attach(key, this.items[key].mesh, live);
+    }
     if (maps.rings && this.ring) {
       this.ring.material.map = maps.rings;
       this.ring.material.needsUpdate = true;
@@ -365,6 +372,8 @@ export class SolarSystemView {
       }
       this.lastFocus.copy(target);
     }
+    // Close to a focused body, down to a few hundredths of its radius above it.
+    this.controls.minDistance = this.focusKey ? this.displayRadius(this.focusKey) * 1.03 : 2e-5;
     this.controls.update();
     this.sky.position.copy(this.camera.position);
 
@@ -399,6 +408,7 @@ export class SolarSystemView {
       const earth = this.items.earth.group.position, sun = this.items.sun.group.position;
       this.earthMaterial.userData.sunView.value.copy(sun).sub(earth).normalize().transformDirection(this.camera.matrixWorldInverse);
     }
+    if (this.detail) this.detail.update(this.camera, this.width, this.height, this.focusKey);
     this.renderer.render(this.scene, this.camera);
     this.labels.render(this.scene, this.camera);
   }

@@ -36,16 +36,19 @@ async function json(url) {
   return r.json();
 }
 
-// Loads the maps that exist: { bodies: {key: texture}, rings, sky, earthDay, earthNight, credits }.
+// Loads the maps that exist: { bodies: {key: texture}, rings, sky, earthDay,
+// earthNight, live: {key: tile service for detail}, credits }.
 export async function loadMaps(base, renderer) {
   let index;
   try { index = await json(`${base}/products/index.json`); } catch { return null; }
   const loader = new THREE.TextureLoader();
   const anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
   const credits = new Set();
+  const maps = { bodies: {}, rings: null, sky: null, earthDay: null, earthNight: null, live: {}, credits };
   const load = async (entry) => {
     try {
       const meta = await json(`${base}/products/${entry.file}`);
+      if (meta.live && meta.body) maps.live[meta.body] = meta.live;
       const texture = await loader.loadAsync(`${base}/products/${meta.file}`);
       texture.colorSpace = THREE.SRGBColorSpace;
       texture.anisotropy = anisotropy;
@@ -55,7 +58,6 @@ export async function loadMaps(base, renderer) {
       return null;
     }
   };
-  const maps = { bodies: {}, rings: null, sky: null, earthDay: null, earthNight: null, credits };
   await Promise.all((index.imagery || []).map(async (e) => {
     if (e.role === 'body') maps.bodies[e.body] = await load(e);
     else if (e.role === 'rings') maps.rings = await load(e);
