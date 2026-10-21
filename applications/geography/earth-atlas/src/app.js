@@ -489,6 +489,15 @@ function coords(lon, lat) {
   return `${Math.abs(lat).toFixed(2)}° ${lat >= 0 ? 'N' : 'S'}, ${Math.abs(lon).toFixed(2)}° ${lon >= 0 ? 'E' : 'W'}`;
 }
 
+// The Celestial Atlas's Sky Chart at a place and instant: on the local servers
+// it has a port of its own; on a site holding the repository, a path of its own.
+function skyUrl(lon, lat, t, name) {
+  const base = location.port === '8790' ? `${location.protocol}//${location.hostname}:8770/` : '../../astronomy/celestial-atlas/';
+  const q = new URLSearchParams({ view: 'sky', lat: lat.toFixed(4), lon: lon.toFixed(4), t: new Date(t).toISOString().slice(0, 16) + 'Z' });
+  if (name) q.set('name', name);
+  return `${base}#${q}`;
+}
+
 function hhmm(hours) {
   const m = Math.round(hours * 60) % 1440;
   return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -574,6 +583,7 @@ function placeCard() {
   const rows = [
     ['Sun’s altitude', `${sun.altitude.toFixed(0).replace('-', '−')}° <span class="dir">${daylight(sun.altitude)}</span>`],
     ['Local mean solar time', hhmm(localMeanSolarTime(t, lon))],
+    ['Sky', `<a class="link" href="${esc(skyUrl(lon, lat, t, where.name))}" target="_blank" rel="noopener">The sky here ↗</a>`],
   ];
   const sections = new Map();
   const add = (domain, term, html, kind = '') => {

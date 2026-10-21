@@ -9,12 +9,19 @@
 // rotation models (src/core/rotation.js) to their orientation at the instant
 // shown; the Earth shows its lights on the night side; the sky behind the stars
 // is the Milky Way.
+//
+// The Earth is turned instead by Greenwich mean sidereal time and precession,
+// the frame in which the Sky Chart places an observer (src/core/sky.js), so that
+// a place chosen by clicking the Earth is the place whose sky the chart shows.
+// (The IAU model of the Earth differs from it by 0.05 to 0.26 degrees in
+// longitude between 2000 and 2100.)
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { BODIES, BY_KEY } from '../core/bodies.js';
-import { AU_KM, ICRS_TO_ECLIPTIC, ICRS_TO_GALACTIC, apply, multiply, transpose, sub } from '../core/frames.js';
+import { AU_KM, DEG, ICRS_TO_ECLIPTIC, ICRS_TO_GALACTIC, apply, multiply, transpose, sub, rotZ } from '../core/frames.js';
+import { geocentricLatitude, geodeticLatitude } from '../core/geodesy.js';
 import { bodyFixedMatrix } from '../core/rotation.js';
 import { BODY_FROM_LOCAL, quaternionOf, skyRotation, skySphere, nightLights } from '../render/maps.js';
 import { BodyDetail } from '../render/detail.js';
@@ -332,6 +339,40 @@ export class SolarSystemView {
     return hits.length ? hits[0].object.userData.key : null;
   }
 
+  // The place on the Earth under the pointer, { lat, lon } in radians (geodetic,
+  // WGS 84), or null when the pointer is not on the Earth.
+  pickPlace(ndc) {
+    this.raycaster.setFromCamera(ndc, this.camera);
+    const mesh = this.items.earth.mesh;
+    const hit = this.raycaster.intersectObject(mesh, false)[0];
+    if (!hit) return null;
+    const p = mesh.worldToLocal(hit.point.clone()).normalize();
+    // Body-fixed axes from the sphere's local ones: (x, y, z)_body = (x, -z, y)_local.
+    const lon = Math.atan2(-p.z, p.x), psi = Math.asin(Math.max(-1, Math.min(1, p.y)));
+    return { lat: geodeticLatitude(psi), lon };
+  }
+
+  // A mark on the Earth at the observer's place (radians).
+  setObserver(place) {
+    if (!this.observerMark) {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 64;
+      const g = canvas.getContext('2d');
+      g.strokeStyle = '#CA8DBE'; g.lineWidth = 7;
+      g.beginPath(); g.arc(32, 32, 22, 0, 2 * Math.PI); g.stroke();
+      g.fillStyle = '#fdf4fa';
+      g.beginPath(); g.arc(32, 32, 8, 0, 2 * Math.PI); g.fill();
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), sizeAttenuation: false, depthWrite: false }));
+      sprite.scale.set(0.022, 0.022, 1);
+      sprite.renderOrder = 5;
+      this.items.earth.group.add(sprite);
+      this.observerMark = sprite;
+    }
+    const psi = geocentricLatitude(place.lat);
+    // Local direction of the place: (x, y, z)_local = (x, z, -y)_body.
+    this.observerLocal = new THREE.Vector3(Math.cos(psi) * Math.cos(place.lon), Math.sin(psi), -Math.cos(psi) * Math.sin(place.lon));
+  }
+
   update(snap, dt) {
     const pos = new THREE.Vector3();
     const jdTdb = 2451545.0 + snap.et / 86400;
@@ -341,7 +382,7 @@ export class SolarSystemView {
       item.group.position.copy(pos);
       item.mesh.scale.setScalar(this.displayRadius(b.key));
       // The body's orientation: local -> body-fixed -> ICRF -> scene.
-      const B = bodyFixedMatrix(b.key, jdTdb);
+      const B = b.key === 'earth' ? multiply(rotZ(snap.gmst), snap.precession) : bodyFixedMatrix(b.key, jdTdb);
       if (B) quaternionOf(multiply(SCENE_FROM_ICRS, multiply(transpose(B), BODY_FROM_LOCAL)), item.mesh.quaternion);
       if (item.orbit) {
         item.orbit.visible = this.options.orbits;
@@ -349,6 +390,10 @@ export class SolarSystemView {
       }
     }
     this.glow.scale.setScalar(this.displayRadius('sun') * 9);
+    if (this.observerMark) {
+      const earth = this.items.earth.mesh;
+      this.observerMark.position.copy(this.observerLocal).applyQuaternion(earth.quaternion).multiplyScalar(this.displayRadius('earth') * 1.004);
+    }
     if (Math.abs(snap.et - this.lastOrbitEt) > ORBIT_REFRESH_S) this.updateOrbits(snap);
 
     this.grid.visible = this.options.grid;

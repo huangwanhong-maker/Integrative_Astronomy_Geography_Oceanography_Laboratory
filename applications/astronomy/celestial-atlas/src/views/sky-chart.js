@@ -387,6 +387,14 @@ export class SkyChartView {
     ctx.font = `13px ${SERIF}`;
     ctx.textBaseline = 'top';
     ctx.fillText(`${o.name ? `${o.name} · ` : ''}${lat}, ${lon}`, 16, 14);
+    if (o.timezone) {
+      // Local civil time at the place, from its time zone (IANA), as clocks there show it.
+      try {
+        const local = new Intl.DateTimeFormat('en-GB', { timeZone: o.timezone, weekday: 'short', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' })
+          .format(new Date(snap.scales.unixMs));
+        ctx.fillText(`${local} local time`, 16, 34);
+      } catch { /* an unknown zone: no local time */ }
+    }
     ctx.textBaseline = 'bottom';
     const where = sunAlt >= 0 ? 'above' : 'below';
     ctx.fillText(`Sun ${Math.abs(sunAlt).toFixed(1)}° ${where} the horizon · ${skyState(sunAlt)}`, 16, this.height - 14);

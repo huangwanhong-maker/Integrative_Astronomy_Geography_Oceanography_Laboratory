@@ -15,6 +15,8 @@ import {
 import { osculating } from '../src/core/kepler.js';
 import { bodyFixedMatrix } from '../src/core/rotation.js';
 import { tilesFor } from '../src/core/tiles.js';
+import { geocentricLatitude, geodeticLatitude, distanceKm, nearestPlace } from '../src/core/geodesy.js';
+import { orthographic, orthographicInverse } from '../src/render/globe-picker.js';
 import { GM_SUN } from '../src/core/bodies.js';
 import { ICRS_TO_SUPERGALACTIC } from '../src/core/frames.js';
 import {
@@ -254,6 +256,37 @@ if (existsSync(UNGC)) {
   const t = tilesFor([-10, -5, 20, 10], 100, live);
   check('tiles: 20 x 10 degrees at 100 pixels per degree is level 6, 8 x 4 tiles',
     Math.abs(t.z - 6) + Math.abs(t.c1 - t.c0 + 1 - 8) + Math.abs(t.r1 - t.r0 + 1 - 4), 0, '');
+}
+
+// 11. Where the observer stands: latitudes on the ellipsoid, distances, and the
+// globe on which a place is chosen.
+{
+  let worst = 0, maxDiff = 0, atLat = 0;
+  for (let d = -89.5; d <= 89.5; d += 0.5) {
+    const phi = d * DEG, psi = geocentricLatitude(phi);
+    worst = Math.max(worst, Math.abs(geodeticLatitude(psi) - phi));
+    if (Math.abs(phi - psi) > maxDiff) { maxDiff = Math.abs(phi - psi); atLat = d; }
+  }
+  check('geodetic latitude from geocentric and back', worst / DEG, 1e-12, 'deg');
+  // The two latitudes differ most at 45 degrees, by 11.5 arcminutes (Torge and Müller 2012, sec. 4.1).
+  check('geodetic minus geocentric latitude at most 0.1924 deg, at 45 deg', Math.abs(maxDiff / DEG - 0.1924) + Math.abs(Math.abs(atLat) - 45) / 100, 0.0006, 'deg');
+  // London to New York along the sphere: 5570 km (a standard example of the haversine formula).
+  check('distance London - New York', distanceKm(51.5074 * DEG, -0.1278 * DEG, 40.7128 * DEG, -74.006 * DEG) - 5570, 3, 'km');
+  const near = nearestPlace([{ lat: 35.68, lon: 139.77 }, { lat: 48.86, lon: 2.35 }], 35.0 * DEG, 139.0 * DEG);
+  // From 35 N, 139 E to Tokyo: 0.68 degrees of latitude and 0.77 of longitude, 103.0 km.
+  check('the nearest place is Tokyo, 103.0 km away', Math.abs(near.place.lon - 139.77) + Math.abs(near.km - 103.0), 0.1, 'km');
+  let seed = 4, err = 0;
+  const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+  for (let k = 0; k < 2000; k++) {
+    const lon0 = (rnd() * 2 - 1) * Math.PI, lat0 = (rnd() - 0.5) * 0.9 * Math.PI;
+    const lon = (rnd() * 2 - 1) * Math.PI, lat = Math.asin(rnd() * 2 - 1);
+    const p = orthographic(lon, lat, lon0, lat0);
+    if (!p.visible) continue;
+    const q = orthographicInverse(p.x, p.y, lon0, lat0);
+    const dl = Math.abs(((q.lon - lon + 3 * Math.PI) % (2 * Math.PI)) - Math.PI);
+    err = Math.max(err, Math.abs(q.lat - lat), Math.cos(lat) * dl);
+  }
+  check('the globe: orthographic projection and its inverse (Snyder 1987)', err, 1e-9, 'rad');
 }
 
 console.log(failures ? `\n${failures} check(s) failed` : '\nall checks passed');

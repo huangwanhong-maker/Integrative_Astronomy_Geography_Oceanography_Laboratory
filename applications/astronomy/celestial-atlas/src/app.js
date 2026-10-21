@@ -9,6 +9,8 @@ import { snapshot } from './core/sky.js';
 import { osculating } from './core/kepler.js';
 import { loadStars, loadConstellations, listStarCatalogues } from './data/catalog.js';
 import { loadMaps } from './render/maps.js';
+import { GlobePicker } from './render/globe-picker.js';
+import { nearestPlace } from './core/geodesy.js';
 import { SolarSystemView } from './views/solar-system.js';
 import { NeighbourhoodView, LY_PER_PC, absoluteMagnitude } from './views/neighbourhood.js';
 import { SkyChartView } from './views/sky-chart.js';
@@ -58,14 +60,30 @@ function save() {
   } catch { /* storage unavailable */ }
 }
 
+// An address may name a view, a place and an instant, as another application
+// links here: #view=sky&lat=35.68&lon=139.77&name=Tokyo&t=2026-10-22T12:00Z.
+function readLink() {
+  const q = new URLSearchParams(location.hash.slice(1));
+  const out = {};
+  if (VIEW_NAMES[q.get('view')]) out.view = q.get('view');
+  const lat = Number(q.get('lat')), lon = Number(q.get('lon'));
+  if (q.has('lat') && q.has('lon') && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+    out.place = { name: q.get('name') || '', lat, lon, height: 0, timezone: q.get('tz') || undefined };
+  }
+  const t = Date.parse(q.get('t') || '');
+  if (Number.isFinite(t)) out.ms = t;
+  return out;
+}
+
 const saved = readSaved();
+const linked = readLink();
 const state = {
-  view: VIEW_NAMES[saved.view] ? saved.view : 'solar',
-  ms: Date.now(),
-  live: true,
-  paused: false,
+  view: linked.view || (VIEW_NAMES[saved.view] ? saved.view : 'solar'),
+  ms: linked.ms ?? Date.now(),
+  live: linked.ms === undefined,
+  paused: linked.ms !== undefined,
   rate: REAL_TIME,
-  place: saved.place || PLACES[0],
+  place: linked.place || saved.place || PLACES[0],
   selection: {
     solar: { kind: 'body', key: 'earth' },
     near: { kind: 'star', index: null },
@@ -87,7 +105,20 @@ for (const view of Object.keys(state.options)) Object.assign(state.options[view]
 
 const observer = () => ({
   name: state.place.name, lat: state.place.lat * DEG, lon: state.place.lon * DEG, height: state.place.height || 0,
+  timezone: state.place.timezone,
 });
+
+// Coordinates as words: 35.68° N, 139.77° E.
+const placeCoords = (lat, lon) => `${Math.abs(lat).toFixed(2)}° ${lat >= 0 ? 'N' : 'S'}, ${Math.abs(lon).toFixed(2)}° ${lon >= 0 ? 'E' : 'W'}`;
+
+// The Earth Atlas at the same place and instant: on the local servers it has a
+// port of its own; on a site holding the repository, a path of its own.
+function earthAtlasUrl(place, ms) {
+  const base = location.port === '8770' ? `${location.protocol}//${location.hostname}:8790/` : '../../geography/earth-atlas/';
+  const { lat, lon } = place;
+  return `${base}#p=globe&c=${lon.toFixed(1)},${lat.toFixed(1)},2.4&at=${lon.toFixed(3)},${lat.toFixed(3)}`
+    + `&t=${new Date(ms).toISOString().slice(0, 16)}Z`;
+}
 
 // ---- formatting --------------------------------------------------------------
 
@@ -167,6 +198,12 @@ function bodyInfo(snap, key) {
   }
   const kind = key === 'sun' ? 'Star' : key === 'moon' ? 'Natural satellite of the Earth'
     : key === 'pluto' ? 'Dwarf planet' : 'Planet';
+  if (key === 'earth') {
+    const p = state.place;
+    rows.push(['Observer', p.name || placeCoords(p.lat, p.lon)]);
+    if (p.name) rows.push(['', placeCoords(p.lat, p.lon)]);
+    return { title: b.name, subtitle: kind, rows, actions: [['sky', 'The sky from here']] };
+  }
   return { title: b.name, subtitle: kind, rows };
 }
 
@@ -262,6 +299,7 @@ function renderInfo(info) {
   const html = info
     ? `<h2${info.title.length > 18 ? ' class="long"' : ''}>${esc(info.title)}</h2><p class="sub">${esc(info.subtitle)}</p>`
       + `<dl>${info.rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>`
+      + (info.actions ? `<div class="actions">${info.actions.map(([id, label]) => `<button type="button" class="action" data-action="${id}">${esc(label)}</button>`).join('')}</div>` : '')
     : `<p class="hint">Select a ${state.view === 'galaxies' ? 'galaxy' : 'star'} to see its details.</p>`;
   const target = $('#info');
   if (target.dataset.html !== html) {
@@ -310,9 +348,11 @@ async function main() {
   loadMaps(DATA, renderer).then((maps) => {
     if (!maps) return;
     views.solar.setMaps(maps);
+    globe.setImages(maps.earthDay && maps.earthDay.image, maps.earthNight && maps.earthNight.image);
     if (maps.sky) views.near.setSky(maps.sky);
     dirty = true;
   });
+  const globe = new GlobePicker((lat, lon) => choosePlace(lat, lon));
   const galaxyMap = () => state.options.galaxies.mode === 'map';
   const is3d = (v) => v === 'solar' || v === 'near' || (v === 'galaxies' && galaxyMap());
   // The view object that draws the current tab.
@@ -407,6 +447,61 @@ async function main() {
     updatePanel(true);
   }
 
+  // ---- where the observer stands ----
+
+  // Names of places from the geography product (Natural Earth), read when first needed.
+  let gazetteer = null;
+  function loadGazetteer() {
+    if (!gazetteer) {
+      gazetteer = fetch(`${DATA}/products/index.json`).then((r) => r.json()).then((index) => {
+        const entry = (index.geography || [])[0];
+        return entry ? fetch(`${DATA}/products/${entry.file}`).then((r) => r.json()) : null;
+      }).then((g) => {
+        if (!g) return null;
+        // Natural Earth's short names in English: China, not People's Republic of China.
+        const countries = new Map(g.layers.countries.map((c) => [c.id, c.names.default || c.names.en]));
+        return g.layers.places.map((p) => ({ name: p.names.default || p.names.en, lat: p.lat, lon: p.lon,
+          country: countries.get(p.country) || '', timezone: p.timezone }));
+      }).catch(() => null);
+    }
+    return gazetteer;
+  }
+
+  // Nautical time at a longitude (radians): the zone of whole hours from UTC,
+  // as the IANA zone Etc/GMT-k (whose sign is reversed by convention).
+  const nauticalZone = (lon) => {
+    const k = Math.round(lon / DEG / 15);
+    return k === 0 ? 'Etc/GMT' : `Etc/GMT${k > 0 ? '-' : '+'}${Math.abs(k)}`;
+  };
+
+  // The observer at a place (radians), named after the nearest town within
+  // 120 km, and keeping the time zone of the nearest town within 500 km, or
+  // else nautical time.
+  async function choosePlace(lat, lon) {
+    const latDeg = +(lat / DEG).toFixed(4), lonDeg = +(((lon / DEG + 540) % 360) - 180).toFixed(4);
+    state.place = { name: '', lat: latDeg, lon: lonDeg, height: 0 };
+    placeChanged(true);
+    renderOptions();
+    dirty = true;
+    const places = await loadGazetteer();
+    const near = places && nearestPlace(places, lat, lon);
+    if (state.place.lat === latDeg && state.place.lon === lonDeg) {
+      state.place.timezone = near && near.km < 500 && near.place.timezone ? near.place.timezone : nauticalZone(lon);
+      if (near && near.km < 120) state.place.name = `near ${near.place.name}${near.place.country ? `, ${near.place.country}` : ''}`;
+      renderOptions();
+      updatePanel(true);
+    }
+    save();
+  }
+
+  // Keeps the marks of the observer's place in step with it.
+  function placeChanged(centre = false) {
+    const place = { lat: state.place.lat * DEG, lon: state.place.lon * DEG };
+    views.solar.setObserver(place);
+    globe.setPlace(place, centre);
+    updatePanel(true);
+  }
+
   function selectStar(index) {
     state.selection[state.view] = { kind: 'star', index };
     if (state.view === 'near') views.near.select(index);
@@ -471,13 +566,15 @@ async function main() {
     } else if (v === 'sky') {
       const custom = !PLACES.some((p) => p.name === state.place.name);
       html = `<h3>Observer</h3>
+        <canvas id="globe" class="globe-picker" aria-label="Globe: click a place to stand there"></canvas>
         <select id="place">${PLACES.map((p) => `<option${p.name === state.place.name ? ' selected' : ''}>${p.name}</option>`).join('')}
           <option value="custom"${custom ? ' selected' : ''}>${custom ? esc(state.place.name) : 'Custom'}</option></select>
         <div class="coords">
           <label><span>Latitude</span><input id="lat" type="number" step="0.0001" min="-90" max="90" value="${state.place.lat}"></label>
           <label><span>Longitude</span><input id="lon" type="number" step="0.0001" min="-180" max="180" value="${state.place.lon}"></label>
         </div>
-        <button type="button" class="link" id="locate">Use my location</button>
+        <div class="observer-links"><button type="button" class="link" id="locate">Use my location</button>
+          <a class="link" id="weather-here" href="${esc(earthAtlasUrl(state.place, state.ms))}" target="_blank" rel="noopener">The weather here ↗</a></div>
         <h3>Display</h3>
         <label class="range"><span>Faintest stars</span>
           <input type="range" min="3" max="7" step="0.5" value="${o.magLimit}" data-view-option="sky" data-key="magLimit"></label>
@@ -500,6 +597,7 @@ async function main() {
         <h3>Configuration</h3><table class="config" id="config"></table>`;
     }
     $('#options').innerHTML = html;
+    if (v === 'sky') globe.attach($('#globe'));
     updateLegend();
   }
 
@@ -575,7 +673,14 @@ async function main() {
     save();
   });
 
+  $('#info').addEventListener('click', (event) => {
+    const action = event.target.closest('[data-action]');
+    if (action && action.dataset.action === 'sky') showView('sky');
+  });
+
   $('#options').addEventListener('click', (event) => {
+    // The link to the Earth Atlas carries the instant shown when it is followed.
+    if (event.target.id === 'weather-here') event.target.href = earthAtlasUrl(state.place, state.ms);
     const focus = event.target.closest('[data-focus]');
     if (focus) selectBody(focus.dataset.focus, { focus: true });
     const mode = event.target.closest('[data-mode]');
@@ -601,7 +706,9 @@ async function main() {
     if (event.target.id === 'locate' && navigator.geolocation) {
       navigator.geolocation.getCurrentPosition((pos) => {
         state.place = { name: 'My location', lat: +pos.coords.latitude.toFixed(4),
-          lon: +pos.coords.longitude.toFixed(4), height: (pos.coords.altitude || 0) / 1000 };
+          lon: +pos.coords.longitude.toFixed(4), height: (pos.coords.altitude || 0) / 1000,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone };
+        placeChanged(true);
         renderOptions(); dirty = true; save();
       }, () => toast('Location is not available.'));
     }
@@ -611,12 +718,12 @@ async function main() {
     const t = event.target;
     if (t.id === 'place' && t.value !== 'custom') {
       state.place = { ...PLACES.find((p) => p.name === t.value) };
+      placeChanged();
       renderOptions();
     } else if (t.id === 'lat' || t.id === 'lon') {
       const lat = clamp(Number($('#lat').value), -90, 90), lon = clamp(Number($('#lon').value), -180, 180);
       if (Number.isFinite(lat) && Number.isFinite(lon)) {
-        state.place = { name: 'Custom', lat, lon, height: 0 };
-        renderOptions();
+        choosePlace(lat * DEG, lon * DEG);
       }
     } else return;
     dirty = true;
@@ -638,6 +745,9 @@ async function main() {
       -((e.clientY - rect.top) / rect.height) * 2 + 1);
     if (state.view === 'solar') {
       const key = views.solar.pick(ndc);
+      // On the focused Earth, a click chooses where to stand.
+      const place = key === 'earth' && views.solar.focusKey === 'earth' ? views.solar.pickPlace(ndc) : null;
+      if (place) choosePlace(place.lat, place.lon);
       if (key) selectBody(key);
     } else if (state.view === 'galaxies') {
       const index = views.galaxies.pick(ndc);
@@ -791,6 +901,16 @@ async function main() {
 
   // ---- frame loop ----
 
+  // The point under the Sun, for the globe: the Sun's right ascension and
+  // declination of date, less the sidereal time at Greenwich.
+  let lastGlobeSun = -Infinity, lastGlobeMs = NaN;
+  function updateGlobeSun(now) {
+    if (now - lastGlobeSun < 1500 && Math.abs(state.ms - lastGlobeMs) < 600000) return;
+    lastGlobeSun = now; lastGlobeMs = state.ms;
+    const d = toSpherical(apply(snap.precession, snap.bodies.sun.geo));
+    globe.setSun({ lat: d.lat, lon: ((d.lon - snap.gmst) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI });
+  }
+
   let last = performance.now();
   function frame(now) {
     const dt = Math.min(0.25, (now - last) / 1000);
@@ -820,6 +940,7 @@ async function main() {
       view.update(snap, dt);
       view.render();
     } else {
+      if (state.view === 'sky') updateGlobeSun(now);
       const animating = !state.live && !state.paused;
       if (dirty || animating || Math.abs(state.ms - lastDrawnMs) >= 1000) {
         view.draw(snap);
@@ -833,6 +954,17 @@ async function main() {
   }
 
   applyOptions();
+  placeChanged(true);
+  // A place given by a link, without its time zone: the zone of the nearest town, or nautical time.
+  if (!state.place.timezone) {
+    const { lat, lon } = state.place;
+    loadGazetteer().then((places) => {
+      if (state.place.lat !== lat || state.place.lon !== lon) return;
+      const near = places && nearestPlace(places, lat * DEG, lon * DEG);
+      state.place.timezone = near && near.km < 500 && near.place.timezone ? near.place.timezone : nauticalZone(lon * DEG);
+      dirty = true;
+    });
+  }
   showView(state.view);
   $('#loading').hidden = true;
   // For inspection from the browser's console and for automated checks.

@@ -245,7 +245,7 @@ Each module directory contains:
 
 - Record decisions that shape structure, conventions or tooling in `development/decisions/NNNN-slug.md`, using the template in the index.
 - Never rewrite a record. A new record supersedes or amends it, and the old record's status is updated to point to the new one.
-- Records accepted so far: 0001–0020.
+- Records accepted so far: 0001–0021.
 
 ### 6.4 Change Discipline
 
@@ -318,7 +318,7 @@ Each module directory contains:
 
 As of 2026-10-22:
 
-- The architecture and decision records 0001–0020 are written.
+- The architecture and decision records 0001–0021 are written.
 - The layered directory structure is in place, with READMEs.
 - The three libraries are scaffolded as their own git repositories and attached under `lib/`.
 - All four repositories are published on GitHub.
@@ -331,7 +331,8 @@ As of 2026-10-22:
     - orbits.
   - It shows any instant from 1849 to 2150, or live.
   - The Sun, the Moon and the planets carry maps, turned by the IAU rotation models; the Earth shows its lights at night, and the Milky Way lies behind the stars ([ADR 0016](development/decisions/0016-maps-of-bodies-and-iau-rotation.md)). Close to the Moon, Mars or Mercury, finer maps come from NASA's Trek tiles ([ADR 0020](development/decisions/0020-detail-of-bodies-at-close-range.md)).
-  - Its computation is provisional JavaScript, tested against JPL Horizons, Meeus, Tully (2015) and Karachentsev et al. (2013): 61 checks, run with `node applications/astronomy/celestial-atlas/tests/run-tests.mjs`.
+  - The observer is chosen by clicking the Earth, on a globe in the Sky Chart or in the Solar System view; the two atlases link to each other's view of the same place and instant ([ADR 0021](development/decisions/0021-the-sky-from-a-place.md)).
+  - Its computation is provisional JavaScript, tested against JPL Horizons, Meeus, Tully (2015) and Karachentsev et al. (2013): 66 checks, run with `node applications/astronomy/celestial-atlas/tests/run-tests.mjs`.
 - The second application, `applications/geography/earth-atlas`, works ([ADR 0014](development/decisions/0014-earth-atlas-separated-data-and-typed-layers.md)).
   - It shows the Earth's atmosphere, ocean, land and people on a globe or on equal-area and equirectangular maps, at one instant.
   - Its data are separate products, joined only in the application: a base map without thematic values, gridded fields, country indicators and events.

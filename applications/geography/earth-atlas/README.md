@@ -23,7 +23,7 @@ The Earth Atlas shows the atmosphere, the ocean, the land and the people of the 
 - **Fields recognised by standard name and level.** A field with a known CF standard name is drawn in that quantity's style at its level, for example geopotential height at 500 hPa. A field with an unknown one is drawn in a style fitted to its own range.
 - **Models as a choice.** The same quantity from several models (GFS, NOAA's AI model AIGFS, the AIGEFS ensemble, our own two) is one layer with a choice of model.
   - Any two models can be shown as a difference.
-  - The place card gives each model's value and draws their courses together.
+  - The place card gives each model's value and draws their courses together, and links to the sky at that place and time in the Celestial Atlas.
   - Ensemble spread is a layer of its own.
 - **Climate.**
   - Köppen–Geiger classes for four past periods and two future ones under four emission scenarios (Beck et al. 2023). Any two maps can be compared, which shows where the climate changed class.

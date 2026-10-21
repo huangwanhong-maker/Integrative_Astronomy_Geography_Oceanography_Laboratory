@@ -164,3 +164,12 @@ dialog .link { margin-top: 20px; }
   .transport { justify-content: flex-start; }
   .rate { min-width: 0; }
 }
+
+/* The globe on which the observer chooses where to stand. */
+.globe-picker { display: block; width: 100%; max-width: 280px; aspect-ratio: 1; margin: 4px auto 12px; cursor: grab; touch-action: none; }
+.globe-picker:active { cursor: grabbing; }
+.observer-links { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+#info .actions { margin-top: 14px; }
+#info .action { padding: 4px 14px; border-radius: 14px; color: var(--text); border: 1px solid transparent;
+  background: linear-gradient(var(--night-2, #241b27), var(--night-2, #241b27)) padding-box, var(--accent-gradient) border-box; }
+#info .action:hover { color: #fff; }

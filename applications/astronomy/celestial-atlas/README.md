@@ -1,6 +1,6 @@
 # Celestial Atlas
 
-*Status: draft (2026-10-22). Kind: tool. Field: astronomy.* Decision records: [ADR 0011](../../../development/decisions/0011-first-application-celestial-atlas.md), [ADR 0013](../../../development/decisions/0013-galaxies-and-their-relations.md), [ADR 0016](../../../development/decisions/0016-maps-of-bodies-and-iau-rotation.md), [ADR 0020](../../../development/decisions/0020-detail-of-bodies-at-close-range.md).
+*Status: draft (2026-10-22). Kind: tool. Field: astronomy.* Decision records: [ADR 0011](../../../development/decisions/0011-first-application-celestial-atlas.md), [ADR 0013](../../../development/decisions/0013-galaxies-and-their-relations.md), [ADR 0016](../../../development/decisions/0016-maps-of-bodies-and-iau-rotation.md), [ADR 0020](../../../development/decisions/0020-detail-of-bodies-at-close-range.md), [ADR 0021](../../../development/decisions/0021-the-sky-from-a-place.md).
 
 The Celestial Atlas shows the Sun, Moon, planets, stars and galaxies, at any instant from 1849 to 2150 or live. It is organised as five views, from the Solar System out to the cosmic web.
 
@@ -9,7 +9,7 @@ The Celestial Atlas shows the Sun, Moon, planets, stars and galaxies, at any ins
 | Solar System | A 3D heliocentric view in the ecliptic frame of J2000, with DE440 positions and osculating orbits. Bodies carry maps of their surfaces, turned to their orientation at the instant shown, with finer detail of the Moon, Mars and Mercury when one fills the view; the Earth shows its city lights at night; the Milky Way lies behind the stars. Bodies can be enlarged by a stated factor. |
 | Neighbourhood | Stars in 3D at their measured distances, in galactic coordinates, from a chosen catalogue: HYG (Hipparcos) or any fetched Gaia DR3 subset, against the Milky Way as seen from the Sun. The radius ranges from 5 to 5000 pc. |
 | Galaxies | Galaxies and the relations between them, in supergalactic coordinates:<ul><li>**Local Volume** (UNGC): each galaxy is linked to its main disturber, with tidal groups and a Hubble-flow diagram.</li><li>**Local Universe** (2MRS groups): galaxies are linked to their group centres, with named clusters and a mass–light diagram.</li></ul> |
-| Sky Chart | The sky for any place and time, drawn as a star atlas, with constellations named in Latin, English, Chinese or Japanese, the Moon in its phase, and the planets |
+| Sky Chart | The sky for any place and time, drawn as a star atlas, with constellations named in Latin, English, Chinese or Japanese, the Moon in its phase, and the planets. The place is chosen on a small globe, lit as at the instant shown, or by clicking the Earth in the Solar System view; the chart gives local time there and links to the weather in the Earth Atlas. |
 | Orbits | The planets seen from the north ecliptic pole, with lines of sight and their configuration |
 
 ## 1. Running
@@ -59,6 +59,7 @@ To choose which part of a catalogue to fetch, and how much of it, see `python da
   - **Applied:** light-time, IAU 1976 precession, GMST (IAU 2006), topocentric parallax and refraction.
   - **Not applied:** aberration, nutation and deflection, which together amount to under 1′.
 - **Orbits.** Osculating two-body conics, computed from state vectors.
+- **Where the observer stands.** In the Solar System view the Earth is turned by GMST and precession, the Sky Chart's frame, so a place clicked on it is the place whose sky is drawn; the IAU model of the Earth differs by 0.05–0.26° in longitude over 2000–2100. Clicked points are converted to geodetic latitude on WGS 84, named after the nearest Natural Earth town within 120 km, and given its time zone within 500 km, or nautical time at sea.
 - **Orientation of the bodies.** The IAU rotation models (Archinal et al. 2018) give each body's pole (α₀, δ₀) and prime meridian W in the ICRF, including the Moon's periodic terms and those of Mercury and Mars. The rotation to body-fixed axes is B = R_z(W) R_x(90° − δ₀) R_z(90° + α₀).
 - **Detail at close range.** When the focused body fills a third of the view or more, rays from the screen find the region in view in body-fixed longitude and latitude; the tiles of the level whose pixels match the screen's (at most 48) are fetched and drawn over the global map by the body's shader, fading in at their edges.
 - **Maps.** A body's map is in east longitude with 0 at its centre; the textured sphere's local axes are related to body-fixed ones by (x, y, z)_body = (x, −z, y)_local. The Milky Way map is in galactic coordinates; its orientation was checked against twelve bright stars when it was built. The Earth's night lights show where the Sun is below the horizon.
@@ -76,7 +77,7 @@ To choose which part of a catalogue to fetch, and how much of it, see `python da
 node applications/astronomy/celestial-atlas/tests/run-tests.mjs
 ```
 
-There are 61 checks.
+There are 66 checks.
 
 | Quantity | Reference | Agreement |
 |---|---|---|
@@ -88,6 +89,8 @@ There are 61 checks.
 | Tidal index Θ₁ | Karachentsev et al. (2013) | Median difference 0.027 dex |
 | Sub-Earth points of the Sun, the Moon and the planets, 2000–2036 | JPL Horizons | Within 0.011° (Mercury); the others within 0.003° |
 | Tiles for detail, 2000 random regions | Cover the region; the level needed or limited by the count; at most 48 | All |
+| Geodetic and geocentric latitude, WGS 84 | Round trip; greatest difference 0.1924° at 45° (Torge and Müller 2012) | 1 × 10⁻¹⁴ °; 2 × 10⁻⁵ ° |
+| The globe's orthographic projection, 2000 random points | Round trip (Snyder 1987) | 2 × 10⁻¹⁴ rad |
 
 ## 5. Structure
 
@@ -103,8 +106,9 @@ The computation in `src/core/` is a provisional stand-in for the laboratory's C+
 | `src/core/galaxies.js` | Tidal index, main disturbers, inferred masses, tidal groups | `core/domains/astronomy` |
 | `src/core/rotation.js` | IAU rotation models of the Sun, the Moon and the planets | `core/domains/astronomy` |
 | `src/core/tiles.js` | Tiles of an equirectangular map service for a region and a resolution | `core/domains/geography` (cartography) |
+| `src/core/geodesy.js` | Geodetic and geocentric latitude, distances, the nearest place | `core/domains/geodesy` |
 | `src/data/catalog.js` | Loads products: stars, constellations, galaxies | — |
-| `src/render/` | Palette, star points, label placement, maps of the bodies and the sky, detail at close range | `visualization/` |
+| `src/render/` | Palette, star points, label placement, maps of the bodies and the sky, detail at close range, the globe for choosing a place | `visualization/` |
 | `src/views/` | The five views and the galaxy diagrams | `visualization/renderers` |
 
 ## 6. Limits
