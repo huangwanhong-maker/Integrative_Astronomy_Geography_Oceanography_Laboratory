@@ -47,20 +47,30 @@ export class BaseLayer {
       width: W, height: H, style,
     };
     const done = (rgba) => { if (this.painting === ticket) setBase(this.stage.material, rgba, W, H); };
+    // Here, on the main thread: when workers are not available, or one fails.
+    const here = () => {
+      const { data } = baseImage({ elevation, geography: this.geo, coords: this.coords, width: W, height: H, style });
+      done(new Uint8Array(data.buffer));
+    };
     return new Promise((resolve) => {
       let worker;
       try {
         worker = new Worker(new URL('../workers/relief.worker.js', import.meta.url), { type: 'module' });
       } catch {
-        const { data } = baseImage({ elevation, geography: this.geo, coords: this.coords, width: W, height: H, style });
-        done(new Uint8Array(data.buffer));
+        here();
         resolve();
         return;
       }
       worker.onmessage = (e) => {
         worker.terminate();
         if (e.data.rgba) done(e.data.rgba);
-        else console.error('relief:', e.data.error);
+        else { console.error('relief:', e.data.error); here(); }
+        resolve();
+      };
+      worker.onerror = (e) => {
+        worker.terminate();
+        console.error('relief worker:', e.message || 'failed');
+        here();
         resolve();
       };
       worker.postMessage(job, [job.coords.buffer, ...(job.elevation ? [job.elevation.codes.buffer] : [])]);

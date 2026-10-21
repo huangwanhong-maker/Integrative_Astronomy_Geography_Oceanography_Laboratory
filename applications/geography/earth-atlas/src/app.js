@@ -560,7 +560,9 @@ function placeCard() {
       if (shown.length) {
         const big = shown.reduce((m, e) => (e[f.mag] > m[f.mag] ? e : m), shown[0]);
         rows.push(['Earthquakes shown', String(shown.length)]);
-        rows.push(['Largest', `M ${big[f.mag].toFixed(1)} <span class="dir">${esc(big[f.place] || '')}</span>`]);
+        rows.push(['Largest', `M ${big[f.mag].toFixed(1)}`]);
+        // The place, which can be long, on a line of its own across the card.
+        if (big[f.place]) rows.push(['', esc(big[f.place]), 'gloss']);
       }
     }
     return { title: 'The Earth', sub: formatUTC(t), rows, hint: 'Choose a place on the map.' };
