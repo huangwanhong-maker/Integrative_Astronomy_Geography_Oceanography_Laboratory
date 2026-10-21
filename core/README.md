@@ -16,7 +16,7 @@ Computational code is written in C++ ([ADR 0003](../development/decisions/0003-c
 |---|---|---|---|
 | 0 | `lib/` (calx, morphe, physis) | Numerics and compute; structures; geometry and physics | planned |
 | 1 | [`metrology/`](metrology/) | Astronomical time scales, celestial reference frames, Earth orientation | planned |
-| 2 | [`domains/`](domains/) | Fields: astronomy, oceanography, atmosphere, geodesy. Bridges: tides, navigation, air–sea, climate | planned |
+| 2 | [`domains/`](domains/) | Fields: astronomy, geography, oceanography, meteorology, geodesy. Bridges: tides, navigation, air–sea, climate | planned |
 | 3 | [`inference/`](inference/) | Estimation, filtering, assimilation, uncertainty, learning | planned |
 
 ## 3. Dependency Rule

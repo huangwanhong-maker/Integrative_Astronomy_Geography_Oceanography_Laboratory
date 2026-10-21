@@ -47,7 +47,8 @@ This slice touches every repository at small scale, and also touches astronomy, 
 ## Phase 3. Research Capacity
 
 - **Ocean dynamics beyond tides:** circulation, waves, seawater thermodynamics and biogeochemistry.
-- **Atmospheric dynamics:** a dry dynamical core first, then moist processes and radiation.
+- **Meteorology:** a dry dynamical core first, then moist processes and radiation.
+- **Geography:** terrain and drainage analysis, remote sensing, and a land-use atlas.
 - **Coupling:** the atmosphere and ocean coupled through `air_sea`, leading towards a simple coupled climate model.
 - **Inference:** data assimilation and uncertainty quantification.
 - **Machine learning:** surrogate models.

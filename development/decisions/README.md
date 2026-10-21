@@ -12,14 +12,15 @@ Decisions that concern only one library are recorded in that library's own `deve
 | No. | Decision | Status |
 |---|---|---|
 | [0001](0001-record-architecture-decisions.md) | Record architecture decisions | Accepted; amended by 0009 |
-| [0002](0002-layered-architecture-with-pure-core.md) | Layered architecture with a pure core | Accepted; amended by 0008 |
+| [0002](0002-layered-architecture-with-pure-core.md) | Layered architecture with a pure core | Accepted; amended by 0008, 0010 |
 | [0003](0003-cpp-computational-core.md) | C++ for the computational core | Accepted |
 | [0004](0004-retargetable-computation-stack.md) | Retargetable computation stack | Accepted; amended by 0008 |
 | [0005](0005-visualization-as-representation-layer.md) | Visualization as a representation layer | Accepted |
 | [0006](0006-theory-notes-in-subject-tree.md) | Theory notes in a subject tree | Accepted; amended by 0008 |
-| [0007](0007-atmosphere-and-ocean-as-coupled-system.md) | Atmosphere and ocean as one coupled system | Accepted; amended by 0008 |
+| [0007](0007-atmosphere-and-ocean-as-coupled-system.md) | Atmosphere and ocean as one coupled system | Accepted; amended by 0008, 0010 |
 | [0008](0008-independent-libraries.md) | Independent libraries in separate repositories | Accepted |
 | [0009](0009-development-folder.md) | A development folder for process material | Accepted |
+| [0010](0010-domain-organised-fields-and-applications.md) | Domain-organised fields and applications | Accepted |
 
 ## 2. Template
 

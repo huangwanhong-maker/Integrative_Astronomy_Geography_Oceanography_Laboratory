@@ -49,14 +49,14 @@ Interfaces are extracted from working code that runs end to end. They are not de
 ## 2. Repositories and Layer Map
 
 ```
-Edges        applications/    labs · tools
+Edges        applications/    labs and tools, by field and bridge
              visualization/   scene model · renderers · styles
              observation/     instruments · field work
              data/            registry · acquisition · formats · provenance
                     │ call into
                     ▼
 core/        inference        estimation · filtering · assimilation · uncertainty · learning
-             domains          fields: astronomy · oceanography · atmosphere · geodesy
+             domains          fields: astronomy · geography · oceanography · meteorology · geodesy
                               bridges: tides · navigation · air_sea · climate
              metrology        time scales · reference frames · Earth orientation
                     │ use
@@ -177,8 +177,9 @@ Until a module has content, it exists only as a `planned` row in its parent READ
 | PDE discretisation, discrete exterior calculus, geometric integrators | physis: `discretisation` |
 | n-body dynamics, potential theory, geophysical fluid dynamics, radiative transfer, reaction kinetics | physis |
 | Astronomical time scales, celestial reference frames, Earth orientation | `core/metrology/` |
+| Terrain analysis, spatial data models, land-cover classification, population and land use | `core/domains/geography/` |
 | Seawater equation of state (TEOS-10) | `core/domains/oceanography/` |
-| Moist thermodynamics, cloud microphysics, atmospheric chemistry | `core/domains/atmosphere/` |
+| Moist thermodynamics, cloud microphysics, atmospheric chemistry | `core/domains/meteorology/` |
 | Tide-generating potential, tidal prediction, atmospheric tides | `core/domains/tides/` |
 | Bulk formulae for air–sea fluxes, wind waves | `core/domains/air_sea/` |
 | Energy-balance models, orbital forcing of insolation | `core/domains/climate/` |
@@ -186,7 +187,7 @@ Until a module has content, it exists only as a `planned` row in its parent READ
 | Downloading and registering DE440 or a tide-gauge record | `data/` |
 | Telescope or sensor control | `observation/` |
 | A 3D globe or planetarium renderer | `visualization/renderers/` |
-| An orbital sandbox, a digital tide-predicting machine | `applications/labs/` |
+| An orbital sandbox, a digital tide-predicting machine | `applications/<field or bridge>/`, e.g. `applications/astronomy/`, `applications/tides/` |
 | Reference values from JPL Horizons or NOAA | `validation/` |
 | A derivation about a field or bridge | `theory/<subject>/` |
 | A derivation about mathematics, numerics or general physics | the library that implements it |

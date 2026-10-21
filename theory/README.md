@@ -8,7 +8,7 @@ This directory holds expositions, derivations and proofs about the laboratory's 
 
 ## 2. Subjects
 
-- **Fields:** `astronomy/`, `oceanography/`, `atmosphere/` and `geodesy/`.
+- **Fields:** `astronomy/`, `geography/`, `oceanography/`, `meteorology/` and `geodesy/`.
 - **Bridging topics:** `tides/`, `navigation/`, `air_sea/` and `climate/`.
 
 A subject directory is created together with its first note.

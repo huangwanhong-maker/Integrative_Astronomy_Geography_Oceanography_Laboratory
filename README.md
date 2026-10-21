@@ -1,18 +1,18 @@
 # Integrative Astronomy, Geography, Oceanography Laboratory
 
-This is a long-term programme to learn, use and research astronomy, geometry, oceanography and atmospheric science, including meteorology. It treats them as one connected body of knowledge, in both theory and practice.
+This is a long-term programme to learn, use and research astronomy, geography, oceanography and meteorology as one connected body of knowledge, in both theory and practice. Geometry, mathematics and physics form the shared foundation.
 
 ## Abstract
 
-**English.** This project studies astronomy, geometry, oceanography and atmospheric science, including meteorology, as one connected body of knowledge, in theory and in practice. The fields share their mathematical and physical foundations: spherical geometry, coordinate systems, the rotation group, potential theory, harmonic analysis, and the dynamics of rotating, stratified fluids. They also meet in concrete phenomena, such as tides, celestial navigation, the figure of the Earth, and the coupled exchange between ocean and atmosphere. New ideas will keep emerging and evolving, so the project is designed throughout to be modular, extensible and revisable.
+**English.** This project studies astronomy, geography, oceanography and meteorology as one connected body of knowledge, in theory and in practice. Geometry, mathematics and physics form their shared foundation. The fields share spherical geometry, coordinate systems, the rotation group, potential theory, harmonic analysis and the dynamics of rotating, stratified fluids. They meet in concrete phenomena: tides, navigation, the figure and mapping of the Earth, the coupled exchange between ocean and atmosphere, and the astronomical forcing of climate. New ideas will keep emerging and evolving, so the project is designed throughout to be modular, extensible and revisable.
 
-**中文.** 本项目是一个长期的综合计划，旨在把天文学、几何学、海洋学与大气科学（含气象学）作为一个相互联系的知识整体，从理论与实践两方面加以学习、应用和研究。这些领域共享球面几何、坐标系、旋转群、位势理论、调和分析以及旋转层结流体动力学等数学与物理基础，并在潮汐、天文导航、地球形状以及海洋与大气的耦合交换等现象中交汇。由于新的想法会不断涌现和演化，本项目以模块化、可扩展、可修订为总体设计原则。
+**中文.** 本项目是一个长期的综合计划，以几何学、数学与物理学为共同基础，把天文学、地理学、海洋学与气象学作为一个相互联系的知识整体，从理论与实践两方面加以学习、应用和研究。这些领域共享球面几何、坐标系、旋转群、位势理论、调和分析以及旋转层结流体动力学，并在潮汐、导航、地球的形状与测绘、海洋与大气的耦合交换以及气候的天文强迫等现象中交汇。由于新的想法会不断涌现和演化，本项目以模块化、可扩展、可修订为总体设计原则。
 
-**日本語.** 本プロジェクトは、天文学・幾何学・海洋学・大気科学（気象学を含む）を一つのつながった知識体系として、理論と実践の両面から学び、使い、研究するための長期的な総合プログラムである。これらの分野は球面幾何学、座標系、回転群、ポテンシャル論、調和解析、回転成層流体の力学といった数学的・物理的基盤を共有し、潮汐、天測航法、地球の形状、海洋と大気の結合した交換といった現象において交わる。新しい着想が絶えず生まれ発展していくことを前提に、モジュール性・拡張性・改訂可能性を全体の設計原則とする。
+**日本語.** 本プロジェクトは、幾何学・数学・物理学を共通の基盤として、天文学・地理学・海洋学・気象学を一つのつながった知識体系として、理論と実践の両面から学び、使い、研究するための長期的な総合プログラムである。これらの分野は球面幾何学、座標系、回転群、ポテンシャル論、調和解析、回転成層流体の力学を共有し、潮汐、航法、地球の形状と地図化、海洋と大気の結合した交換、気候の天文学的強制といった現象において交わる。新しい着想が絶えず生まれ発展していくことを前提に、モジュール性・拡張性・改訂可能性を全体の設計原則とする。
 
 ## 1. Motivation and Scope
 
-These subjects are usually taught apart, but shared structure binds them together.
+These subjects are usually taught apart, yet shared structure binds them together.
 
 - **Spheres and rotations.** The geometry of the sphere and of rotations underlies all of these fields.
   - The celestial sphere, the figure of the Earth, and the ocean and atmosphere (thin fluid shells on a rotating sphere) are all described in this language.
@@ -22,7 +22,12 @@ These subjects are usually taught apart, but shared structure binds them togethe
   - The Moon and the Sun set up a tide-generating potential, and the ocean responds to it.
   - Each tidal constituent oscillates at a frequency that is an integer combination of six fundamental astronomical frequencies (Doodson's expansion).
   - The tidal spectrum therefore carries a lattice structure.
-- **Celestial navigation joins astronomy to geometry at sea.** A position is fixed from star sights by solving a spherical triangle, with an almanac computed by positional astronomy.
+- **Geography maps the surface on which the other fields meet.**
+  - Its maps rest on geodesy and on map projections.
+  - Its climatic zones follow from the way sunlight is distributed over the sphere.
+  - Its coasts are where land, sea and air meet.
+  - Its satellites observe all of these at once.
+- **Navigation joins astronomy to geography.** A position at sea is fixed from star sights by solving a spherical triangle, using an almanac computed by positional astronomy. The resulting route is then drawn on a chart.
 - **Ocean and atmosphere form one coupled fluid system.**
   - Both obey the equations of rotating, stratified flow.
   - They exchange momentum, heat, freshwater and gases at the sea surface.
@@ -35,30 +40,37 @@ The project serves three activities:
 - **Use:** tested computational tools whose results can be relied on.
 - **Research:** open questions, and new results built on the first two.
 
-Geodesy, navigation and climate already appear as bridging topics. Further fields, such as geophysics and the cryosphere, may join as the work grows.
+The scope of the fields:
+
+- **Geography** covers all its branches: physical geography, cartography and GIS, remote sensing, human geography, and others as the work requires.
+- **Meteorology** is taken in the broad sense of atmospheric science.
+- **Geodesy** supports all four fields.
+- **Bridges.** Tides, navigation, air–sea interaction and climate bridge the fields.
+- **Future fields.** Fields such as geophysics and the cryosphere may join as the work grows.
 
 ## 2. Design Philosophy
 
-The project will grow over a long time and will change direction as understanding deepens. Five principles govern how it is built.
+The project will grow over a long time and will change direction as understanding deepens. Five principles govern its construction.
 
 ### 2.1 Modularity
 
-- **Layers.** The project is built as layers, and its dependencies point only downward.
-- **Independent libraries.** General knowledge lives in independent libraries, each in its own repository:
+- The project is built as layers, and its dependencies point only downward.
+- General knowledge lives in independent libraries, each in its own repository:
   - numerics and computation;
   - mathematical structures;
   - geometry and physics.
-- **Pure core, effectful edges.** The libraries and the laboratory's core are pure computation, with no network, instruments or user interface. Data acquisition, observation, visualization and applications sit at the edges and call into the core.
+- The libraries and the laboratory's core are pure computation. They have no network, instruments or user interface.
+- Data acquisition, observation, visualization and applications sit at the edges and call into the core.
 
 ### 2.2 Extensibility
 
-- Adding a field, a method, a device or a presentation technique means adding a module. It never means rewriting existing ones.
-- Computing hardware and presentation media change constantly. In both, a stable, device-neutral representation separates *what* is done from *how* it is realised, and each technology is a plug-in backend.
+- Adding a field, a method, a device or a presentation technique means adding a module, not rewriting existing ones.
+- Computing hardware and presentation media change constantly. In both, a stable, device-neutral representation separates *what* is done from *how* it is realised. Each technology is then a plug-in backend.
 
 ### 2.3 Revisability
 
 - Every module and note carries a status: `planned`, `seed`, `draft`, `stable` or `deprecated`.
-- Significant decisions are recorded with the alternatives that were considered, so they can be revisited deliberately.
+- Significant decisions are recorded together with the alternatives considered, so that they can be revisited deliberately.
 - Ideas are captured early and promoted once they mature.
 
 ### 2.4 Unity of Theory and Computation
@@ -73,15 +85,13 @@ The project will grow over a long time and will change direction as understandin
 
 ## 3. Architecture
 
-The project spans four repositories. The laboratory composes three independent libraries, all written in C++:
+The project spans four repositories. The laboratory composes three independent C++ libraries:
 
 | Library | Scope |
 |---|---|
-| [**calx**](https://github.com/huangwanhong-maker/calx) | A retargetable computation stack in the manner of TVM, Halide and MLIR (representation, schedule, compiler, runtime, scheduler, backends), together with numerical methods. A computation is written once. It then runs on the CPU, the reference backend, and on any device for which a backend exists, including devices not yet invented. |
-| [**morphe**](https://github.com/huangwanhong-maker/morphe) | Mathematical structures and their equivalences: exact arithmetic, algebra, category theory, topology, algebraic geometry, and formal structures such as automata, grammars and rewriting systems. It also covers notions of sameness, such as bisimulation and bimorphism. |
+| [**calx**](https://github.com/huangwanhong-maker/calx) | A retargetable computation stack in the manner of TVM, Halide and MLIR (representation, schedule, compiler, runtime, scheduler, backends), together with numerical methods. A computation is written once. It then runs on the CPU, which is the reference backend, and on any device for which a backend exists, including devices not yet invented. |
+| [**morphe**](https://github.com/huangwanhong-maker/morphe) | Mathematical structures and their equivalences: exact arithmetic, algebra, category theory, topology, algebraic geometry, and formal structures such as automata, grammars and rewriting systems. It also covers notions of sameness such as bisimulation and bimorphism. |
 | [**physis**](https://github.com/huangwanhong-maker/physis) | Geometry and theoretical physics: units, differential geometry, structure-preserving discretisation, mechanics, gravitation, thermodynamics, geophysical fluid dynamics, chemistry and radiation |
-
-The libraries and the laboratory are layered as follows:
 
 ```
 Edges        applications · visualization · observation · data
@@ -92,23 +102,33 @@ lib/         physis ──► calx
                 └─────► morphe                          (calx and morphe are independent)
 ```
 
-The laboratory's domains cover four fields (astronomy, oceanography, atmosphere, geodesy) and four bridges between them (tides, navigation, air–sea interaction, climate). Visualization is a representation layer: a device-neutral scene model, with one renderer per technique.
+The domains are the fields investigated together:
+
+- **Fields:** astronomy, geography, oceanography and meteorology, supported by geodesy.
+- **Bridges:** tides, navigation, air–sea interaction and climate.
+
+`applications/` mirrors the same fields and bridges, holding labs and tools for each. Visualization is a representation layer: a device-neutral scene model, with one renderer per technique.
 
 For more detail:
-- full design: [docs/architecture.md](docs/architecture.md);
-- decisions: [development/decisions/](development/decisions/);
-- plan: [development/roadmap.md](development/roadmap.md).
+
+- Full design: [docs/architecture.md](docs/architecture.md).
+- Decisions: [development/decisions/](development/decisions/).
+- Plan: [development/roadmap.md](development/roadmap.md).
 
 ## 4. Organisation of the Repository
 
 ```
 .
 ├── lib/                   calx · morphe · physis (git submodules)
-├── core/                  metrology · domains · inference
+├── core/
+│   ├── metrology/         time scales · reference frames · Earth orientation
+│   ├── domains/           astronomy · geography · oceanography · meteorology · geodesy
+│   │                      tides · navigation · air_sea · climate
+│   └── inference/         estimation · filtering · assimilation · uncertainty · learning
+├── applications/          labs and tools, one folder per field and bridge
 ├── data/                  dataset registry · acquisition · formats · provenance
 ├── observation/           instruments · field work
 ├── visualization/         scene model · renderers · styles
-├── applications/          laboratories · tools
 ├── validation/            reference values · standard problems · benchmarks
 ├── theory/                notes on fields and bridges
 ├── notebooks/             exploration and teaching
@@ -118,7 +138,7 @@ For more detail:
 └── assets/                images · fonts · style tokens
 ```
 
-Clone the repository together with its libraries:
+To clone the repository together with its libraries:
 
 ```
 git clone --recurse-submodules https://github.com/huangwanhong-maker/Integrative_Astronomy_Geography_Oceanography_Laboratory.git
@@ -128,9 +148,9 @@ Every directory has a README describing its purpose and planned modules. [`CLAUD
 
 ## 5. Status
 
-**Foundational stage (2026-10-21).**
-- The architecture is designed, and the four repositories are scaffolded. There is no code yet.
-- The next step is Phase 0 of the [roadmap](development/roadmap.md): repositories, toolchain and build.
+**Foundational stage (2026-10-22).** The architecture is designed, and the four repositories are scaffolded and published. There is no code yet.
+
+The next step is Phase 0 of the [roadmap](development/roadmap.md): the toolchain and the build.
 
 ## 6. License
 

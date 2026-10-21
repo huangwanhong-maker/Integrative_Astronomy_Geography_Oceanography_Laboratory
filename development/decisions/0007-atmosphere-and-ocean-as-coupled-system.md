@@ -1,6 +1,6 @@
 # 0007. Atmosphere and Ocean as One Coupled System
 
-- **Status:** Accepted; amended by [0008](0008-independent-libraries.md): the shared physics now lives in physis
+- **Status:** Accepted; amended by [0008](0008-independent-libraries.md): the shared physics now lives in physis; amended by [0010](0010-domain-organised-fields-and-applications.md): the field is named meteorology
 - **Date:** 2026-10-21
 - **Decided by:** the user ("also add atmospheric and meteorology … ocean cannot leave them"). Claude designed the placement.
 

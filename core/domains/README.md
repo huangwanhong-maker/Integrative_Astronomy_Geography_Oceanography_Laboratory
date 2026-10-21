@@ -1,42 +1,55 @@
 # domains: Fields and the Bridges Between Them
 
-*Status: planned.* This is layer 2 of `core/`.
+*Status: planned.* Layer 2 of `core/`.
 
 ## 1. Purpose
 
-This layer applies the physics and mathematics below it to particular bodies and systems.
+This directory holds the fields that the laboratory investigates together, and the topics that bridge them.
 
-- **Fields** are the established subjects, such as astronomy and oceanography.
-- **Bridges** are topics that join two or more fields, such as tides.
+- **Fields.** A field applies the mathematics and physics of the libraries to particular bodies and systems: the sky, the Earth's surface, the ocean and the atmosphere.
+- **Bridges.** A bridge joins two or more fields. It declares the fields it joins, and depends on them.
 
-Fields and bridges are siblings in this directory. A bridge declares the fields it joins, and depends on them.
+Every field and bridge has its own directory from the start ([ADR 0010](../../development/decisions/0010-domain-organised-fields-and-applications.md)). The modules inside them are created when their first content is written. `applications/` mirrors this structure.
 
-## 2. Planned Modules
+## 2. Fields
 
-| Module | Kind | Scope |
+| Field | Scope | Status |
 |---|---|---|
-| `astronomy` | field | Positional astronomy. Ephemerides, with an evaluator for the JPL DE format. Astrometry and image reduction. Later, astrophysics and cosmology. |
-| `oceanography` | field | Physical oceanography: circulation and waves. Seawater thermodynamics (TEOS-10). Chemical and biological oceanography, including biogeochemistry. Seafloor and bathymetry. |
-| `atmosphere` | field | Atmospheric dynamics. Moist thermodynamics, clouds and precipitation. Radiation budget. Boundary layer. Atmospheric chemistry. Weather analysis and prediction. |
-| `geodesy` | field | Figure of the Earth. Gravity field and geoid. Earth rotation. Coordinate reference systems. |
-| `tides` | bridge: astronomy, geodesy, oceanography, atmosphere | Tide-generating potential. Equilibrium tide. Doodson arguments and tidal constituents. Tidal analysis and prediction. Dynamic tides. Atmospheric tides. |
-| `navigation` | bridge: astronomy, geodesy | Celestial navigation and sight reduction. Dead reckoning. Later, GNSS. |
-| `air_sea` | bridge: atmosphere, oceanography | Fluxes of momentum, heat, freshwater and gases across the sea surface. Wind waves. |
-| `climate` | bridge: atmosphere, oceanography, astronomy | The coupled system. Energy balance. Variability, such as ENSO and the monsoons. Orbital forcing (Milankovitch cycles). Later, the cryosphere and land. |
+| [`astronomy/`](astronomy/) | Positional astronomy, ephemerides, astrometry; later astrophysics and cosmology | planned |
+| [`geography/`](geography/) | All branches: physical geography, cartography and GIS, remote sensing, human geography, and others as the work requires | planned |
+| [`oceanography/`](oceanography/) | Physical, chemical and biological oceanography; seawater thermodynamics; the seafloor | planned |
+| [`meteorology/`](meteorology/) | Meteorology in the broad sense of atmospheric science: dynamics, moist processes, radiation, chemistry, weather prediction | planned |
+| [`geodesy/`](geodesy/) | The figure of the Earth, its gravity field and rotation, and reference systems. The other fields rest on it. | planned |
 
-Ocean and atmosphere are treated as one coupled system ([ADR 0007](../../development/decisions/0007-atmosphere-and-ocean-as-coupled-system.md)). The fluid dynamics they share lives in the physis library, module `continuum`. What passes between them is handled by the `air_sea` and `climate` bridges.
+## 3. Bridges
 
-## 3. Reference Models
+| Bridge | Joins | Scope | Status |
+|---|---|---|---|
+| [`tides/`](tides/) | astronomy, geodesy, oceanography, meteorology | The tide-generating potential, ocean and atmospheric tides, and tidal analysis and prediction | planned |
+| [`navigation/`](navigation/) | astronomy, geodesy, geography | Celestial navigation, charts and routes; later GNSS | planned |
+| [`air_sea/`](air_sea/) | meteorology, oceanography | Exchange of momentum, heat, freshwater and gases at the sea surface; wind waves | planned |
+| [`climate/`](climate/) | meteorology, oceanography, geography, astronomy | The coupled system, energy balance, climatic zones, variability, and orbital forcing | planned |
 
-Mature, open models and products show how fluid dynamics, chemistry, radiation and observations are combined in practice:
+## 4. Dependencies
 
-- **Ocean:**
-  - the models MITgcm, MOM6, NEMO, ROMS, FESOM and Oceananigans.jl;
-  - the ECCO ocean state estimate.
-- **Atmosphere and coupled system:**
-  - WRF, MPAS and ICON;
-  - the Earth-system models CESM and E3SM;
-  - the ERA5 reanalysis;
-  - machine-learning weather models, such as GraphCast and ECMWF's AIFS.
+- **Between fields.** A field may depend on another field when the dependency is declared and acyclic. For example, geography depends on geodesy.
+- **Bridges.** A bridge depends on the fields it joins.
+- **No field depends on a bridge.**
+- **Shared physics.** Ocean and atmosphere are treated as one coupled system ([ADR 0007](../../development/decisions/0007-atmosphere-and-ocean-as-coupled-system.md)). The fluid dynamics they share lives in the physis library, in its `continuum` module.
 
-We study them, reimplement their algorithms in this framework where useful, and validate our results against them. Reimplementing an algorithm is always allowed. Copying their code requires that their licence be compatible with ours ([idea](../../development/ideas/2026-10-21-learning-from-ocean-models.md)).
+## 5. Reference Models and Systems
+
+Mature, open models and systems show how physics, data and observation are combined in practice.
+
+- **Ocean:** the models MITgcm, MOM6, NEMO, ROMS, FESOM and Oceananigans.jl, and the ECCO state estimate.
+- **Meteorology and the coupled system:** WRF, MPAS and ICON; the Earth-system models CESM and E3SM; the ERA5 reanalysis; and machine-learning weather models such as GraphCast and ECMWF's AIFS.
+- **Geography:**
+  - PROJ and GDAL (permissive licences), which may be linked;
+  - QGIS and GRASS GIS (GPL), which we study but do not link.
+
+We study these systems, reimplement their algorithms in this framework where useful, and validate against them.
+
+- Reimplementing an algorithm is always allowed.
+- Copying code requires a compatible licence.
+
+See also the [idea on learning from ocean models](../../development/ideas/2026-10-21-learning-from-ocean-models.md).

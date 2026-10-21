@@ -28,6 +28,11 @@ This directory finds, downloads, verifies and records the external data that the
 | Radiosonde profiles (IGRA) | NOAA NCEI | Vertical structure of the atmosphere |
 | Gaia DR3 | ESA | Stars for visualization |
 | Planetary surfaces | NASA SVS, USGS Astrogeology | Textures and topography |
+| Copernicus DEM, SRTM | ESA / Copernicus, NASA | Terrain, for geography and tide models |
+| Natural Earth | Natural Earth | Cartographic vector data |
+| Landsat, Sentinel-2 | USGS / NASA, ESA / Copernicus | Remote sensing of the land surface |
+| OpenStreetMap | OpenStreetMap contributors (ODbL) | Settlement, land use, transport |
+| GHSL, WorldPop | European Commission JRC, WorldPop | Population and built-up area |
 
 ## 4. Licences
 

@@ -10,12 +10,14 @@ This file can be revised: when a decision recorded here changes, update this fil
 
 ## 1. Purpose and Scope
 
-This is an integrated programme to learn, use and research astronomy, geometry, oceanography and atmospheric science (including meteorology), in both theory and practice.
+This is an integrated programme to learn, use and research astronomy, geography, oceanography and meteorology, in both theory and practice. Geometry, mathematics and physics are the shared foundation.
 
-- These fields are treated as one connected body of knowledge, not as separate subjects.
-- Ocean and atmosphere in particular are studied as one coupled system ([ADR 0007](development/decisions/0007-atmosphere-and-ocean-as-coupled-system.md)).
-- Geodesy, navigation and climate already appear as topics that bridge fields.
-- Further fields, such as geophysics and the cryosphere, may join as the work grows.
+- **One body of knowledge.** These fields are treated as connected, not as separate subjects. They are the fields of `core/domains/` ([ADR 0010](development/decisions/0010-domain-organised-fields-and-applications.md)).
+- **Geography** covers all its branches: physical geography, cartography and GIS, remote sensing, human geography, and others as the work requires.
+- **Meteorology** is taken in the broad sense of atmospheric science. Ocean and atmosphere are studied as one coupled system ([ADR 0007](development/decisions/0007-atmosphere-and-ocean-as-coupled-system.md)).
+- **Geodesy** supports all four fields.
+- **Bridges.** Tides, navigation, air–sea interaction and climate bridge the fields.
+- **Future fields.** Others, such as geophysics and the cryosphere, may join as the work grows.
 
 The project serves three activities. Every artefact should make clear which one it serves.
 
@@ -34,7 +36,7 @@ They also meet in concrete phenomena:
 
 - tides;
 - celestial navigation;
-- the figure of the Earth;
+- the figure of the Earth and the mapping of its surface;
 - the exchange of heat, momentum and water between ocean and atmosphere;
 - the astronomical forcing of climate.
 
@@ -199,13 +201,13 @@ These conventions are shared with all three libraries.
 │   └── physis/            units · geometry · discretisation · mechanics · gravitation · thermodynamics · continuum · chemistry · radiation
 ├── core/                  the laboratory's pure library (C++)
 │   ├── metrology/         time scales · reference frames · Earth orientation
-│   ├── domains/           fields: astronomy · oceanography · atmosphere · geodesy (ADR 0007)
+│   ├── domains/           fields: astronomy · geography · oceanography · meteorology · geodesy (ADR 0010)
 │   │                      bridges: tides · navigation · air_sea · climate
 │   └── inference/         estimation · filtering · assimilation · uncertainty · learning
 ├── data/                  dataset registry · acquisition · formats · provenance
 ├── observation/           instruments · field work
 ├── visualization/         scene model · renderers · styles (ADR 0005)
-├── applications/          laboratories · tools
+├── applications/          labs and tools, one folder per field and bridge (ADR 0010)
 ├── validation/            reference values · standard problems · benchmarks
 ├── theory/                notes on fields and bridges (ADR 0006, 0008)
 ├── notebooks/             exploration and teaching
@@ -217,6 +219,9 @@ These conventions are shared with all three libraries.
 
 - Every directory has a README giving its purpose, its planned modules with their status, and its dependencies.
 - A subdirectory is created when its first content is written. Until then it is a `planned` row in its parent README.
+- The exceptions are:
+  - the field and bridge directories of `core/domains/` and `applications/` (ADR 0010);
+  - the component directories of calx's `compute/`.
 - When the layout changes, update this section, README §4 and the affected parent READMEs in the same change.
 
 ## 6. Working Procedures
@@ -240,7 +245,7 @@ Each module directory contains:
 
 - Record decisions that shape structure, conventions or tooling in `development/decisions/NNNN-slug.md`, using the template in the index.
 - Never rewrite a record. A new record supersedes or amends it, and the old record's status is updated to point to the new one.
-- Records accepted so far: 0001–0009.
+- Records accepted so far: 0001–0010.
 
 ### 6.4 Change Discipline
 
@@ -301,7 +306,7 @@ Each module directory contains:
 
 As of 2026-10-22:
 
-- The architecture and decision records 0001–0009 are written.
+- The architecture and decision records 0001–0010 are written.
 - The layered directory structure is in place, with READMEs.
 - The three libraries are scaffolded as their own git repositories and attached under `lib/`.
 - All four repositories are published on GitHub.
