@@ -1,50 +1,100 @@
 # registry: Dataset Manifests
 
-*Status: draft.* Each external dataset the project uses has one manifest here. A manifest says what the data are, where they come from, what licence they carry, and how to acquire them. Manifests are read by [`../acquisition/fetch.py`](../acquisition/fetch.py), which downloads or queries the data into `data/cache/` and writes a provenance record (`retrieval.json`) beside each result.
+*Status: draft.* Each external dataset the project uses has one manifest here. A manifest says:
+- what the data are;
+- where they come from;
+- what licence they carry;
+- how to acquire them.
+
+Manifests are read by [`../acquisition/fetch.py`](../acquisition/fetch.py). It downloads or queries the data into `data/cache/`, and writes a provenance record (`retrieval.json`) beside each result.
 
 ## 1. Kinds of Dataset
 
 | Kind | Meaning | Example |
 |---|---|---|
-| `files` | Fixed files, downloaded as they are. Each file's SHA-256 is recorded in the manifest and verified on every retrieval. | `jpl-de440s` |
-| `tap` | A query to an astronomical archive through the IVOA Table Access Protocol. The manifest declares parameters and profiles, so that a user chooses which part of a catalogue to take and how much of it. | `gaia-dr3`, `ungc`, `tully-2mass-groups` |
+| `files` | Fixed files, downloaded as they are. Each file's SHA-256 is recorded in the manifest and verified on every retrieval. | `jpl-de440s`, `natural-earth-50m` |
+| `tap` | A query to an astronomical archive through the IVOA Table Access Protocol | `gaia-dr3`, `ungc`, `tully-2mass-groups` |
+| `griddap` | A subset of a gridded dataset served by ERDDAP: which variables, which times, how fine a grid | `gfs`, `oisst`, `ww3`, `etopo-2022` |
+| `http` | One or more web requests built from URL templates | `worldbank-indicators`, `usgs-earthquakes` |
+
+All kinds except `files` declare parameters and profiles, so that a user chooses which part of a dataset to take and how much of it ([ADR 0012](../../development/decisions/0012-selectable-parameterised-datasets.md)).
 
 ## 2. Common Fields
 
 | Field | Meaning |
 |---|---|
 | `id` | Identifier; also the name of the cache folder |
-| `kind` | `files` (the default) or `tap` |
+| `kind` | `files` (the default), `tap`, `griddap` or `http` |
+| `domain` | The field the data belong to: `astronomy`, `geography`, `oceanography`, `meteorology`, `geophysics`, `climate`. Applications group data by it. |
 | `title`, `provider` | What the dataset is and who produced it |
-| `format`, `coverage` | Units, frames, epochs; what the data cover |
+| `credit` | A short attribution, shown on maps |
+| `format`, `coverage` | Units, frames, epochs, grids; what the data cover |
 | `licence`, `citation` | Terms of use, and how to cite. The project's MIT licence does not cover data. |
 | `used_by` | The applications or modules that depend on the dataset |
 
 ## 3. Fields of `files` Datasets
 
-`files` is a list of `{url, file, size, sha256}`. A `null` checksum marks a file never verified. Run `fetch.py --record` once to record it.
+`files` is a list of `{url, file, size, sha256}`. A `null` checksum marks a file never verified; run `fetch.py --record` once to record it. Prefer URLs pinned to a release (for example a git tag), so that checksums stay valid.
 
-## 4. Fields of `tap` Datasets
+## 4. Parameters and Profiles
+
+These fields are shared by the parameterised kinds (`tap`, `griddap`, `http`).
+
+| Field | Meaning |
+|---|---|
+| `parameters` | For each parameter: `type`, `default`, optional `min` and `max`, and a `description`. The type is `int`, `float`, `str` or `time`. |
+| `profiles` | Named sets of parameter values, each with a `description` |
+| `default_profile` | The profile used when none is chosen |
+
+A retrieval chooses a profile with `--profile` and may override any parameter with `--set name=value`.
+
+**Parameters of type `time`** accept two forms:
+- an ISO 8601 instant, read as UTC when it has no offset;
+- an expression `now`, `today` or `last`, optionally followed by `+` or `−` and a number of hours (`h`) or days (`d`), for example `now-1d` or `last-29d`.
+
+The anchors mean:
+- `now` is the present, rounded down to the hour;
+- `today` is 00:00 UTC;
+- `last` is the dataset's last time (`griddap` only).
+
+The resolved instants are recorded in the provenance.
+
+**Cache folders.** Results go to `data/cache/<id>/<profile>/`. When parameters are overridden, they go to `data/cache/<id>/custom-<hash>/`, named by a hash of the values.
+
+**Refreshing.** A retrieval whose request is identical to the cached one is not repeated. Relative times make "the latest forecast" a moving target, so fetching again replaces it once a new request results.
+
+## 5. Fields of `tap` Datasets
 
 | Field | Meaning |
 |---|---|
 | `service` | Base URL of the TAP service |
 | `query` | ADQL as a list of lines, with `{parameter}` placeholders |
-| `file` | Name of the result file in the cache folder (CSV) |
-| `parameters` | For each parameter: `type` (`int`, `float` or `str`), `default`, optional `min` and `max`, and a `description` |
-| `profiles` | Named sets of parameter values, each with a `description` |
-| `default_profile` | The profile used when none is chosen |
-| `maxrec_parameter` | The parameter passed to the service as `MAXREC`. Defaults to `limit`. Without it, many services truncate results silently. |
+| `file` | Name of the result file (CSV) |
+| `maxrec_parameter` | The parameter passed to the service as `MAXREC` (default `limit`). Without it, many services truncate results silently. |
 
-A retrieval chooses a profile with `--profile` and may override any parameter with `--set name=value`.
+## 6. Fields of `griddap` Datasets
 
-- **Cache folder.** The result goes to `data/cache/<id>/<profile>/`. When parameters are overridden, the folder is instead `data/cache/<id>/custom-<hash>/`, named by a hash of the parameter values.
-- **Provenance.** `retrieval.json` records the service, the exact query, the parameters, the row count, the size, the checksum and the time of retrieval.
+| Field | Meaning |
+|---|---|
+| `service`, `dataset` | The ERDDAP server (ending in `/erddap`) and the dataset identifier |
+| `variables` | Comma-separated variable names, or a `{parameter}` |
+| `axes` | The axes, in the dataset's order. Each is `{name, from, to, stride}`, with values in the axis's units. The time axis instead takes `{from, to, step_hours}`, with `time` parameters. A fixed axis (such as a depth of 0) has `from` equal to `to`. |
+| `attributes` | Attributes to add to variables whose source lacks them, such as `units` or `standard_name` |
+| `file` | Name of the result (netCDF classic, default `data.nc`) |
 
-## 5. Usage
+**Choosing times.** For the time axis, `fetch.py` reads the dataset's time values within the window. It takes those on the step, aligned to 00:00 UTC, or to the first time when none falls there, as for daily means stamped at 12:00. It then requests them with a single stride. The window is clamped to the dataset's coverage.
+
+## 7. Fields of `http` Datasets
+
+`requests` is a list of `{url, file}`. Each URL is a template with `{parameter}` placeholders. A `time` parameter may carry a format, as in `{start:%Y-%m-%dT%H:%M:%S}`.
+
+## 8. Usage
 
 ```
 python data/acquisition/fetch.py --list                               # datasets, parameters, profiles
 python data/acquisition/fetch.py gaia-dr3 --profile nearby
 python data/acquisition/fetch.py gaia-dr3 --set limit=50000 --set g_max=9.5
+python data/acquisition/fetch.py gfs --profile glance
+python data/acquisition/fetch.py oisst --set start=2026-01-01 --set end=2026-01-31
+python data/acquisition/fetch.py worldbank-indicators --set indicator=SP.POP.65UP.TO.ZS   # share aged 65 and over
 ```

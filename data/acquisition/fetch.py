@@ -1,20 +1,32 @@
 """Acquire registered datasets into the local cache.
 
 A dataset is described by a manifest in ``data/registry/`` (schema:
-``data/registry/README.md``). There are two kinds:
+``data/registry/README.md``). There are four kinds:
 
 ``files``
     Fixed files, downloaded as they are, such as the DE440 kernel. Their
     checksums are recorded in the manifest and verified on every retrieval.
 ``tap``
     A query to an astronomical archive through the Table Access Protocol, such
-    as Gaia. The manifest declares parameters (which part of the catalogue and
-    how much of it) and named profiles. A retrieval chooses a profile and may
-    override any parameter.
+    as Gaia.
+``griddap``
+    A subset of a gridded dataset served by ERDDAP, such as a weather forecast
+    or a sea-surface temperature analysis: which variables, which times, and
+    how fine a grid.
+``http``
+    One or more web requests built from URL templates, such as the World
+    Bank's indicators or the USGS earthquake catalogue.
 
-Files go to ``data/cache/<id>/``, or ``data/cache/<id>/<profile>/`` for queries,
-with a provenance record, ``retrieval.json``, beside them. The cache is not
-under version control.
+Every kind except ``files`` declares parameters (which part of the data and how
+much of it) and named profiles. A retrieval chooses a profile and may override
+any parameter. Parameters of type ``time`` accept an ISO 8601 instant (UTC if
+no offset is given) or an expression relative to the present or to the end of
+the dataset: ``now``, ``today`` or ``last``, optionally followed by ``+`` or
+``-`` and a number of hours (``h``) or days (``d``), as in ``now-1d``.
+
+Files go to ``data/cache/<id>/``, or ``data/cache/<id>/<profile>/`` for the
+parameterised kinds, with a provenance record, ``retrieval.json``, beside them.
+The cache is not under version control.
 
 Usage::
 
@@ -24,6 +36,7 @@ Usage::
     python data/acquisition/fetch.py gaia-dr3                      # a query, default profile
     python data/acquisition/fetch.py gaia-dr3 --profile nearby
     python data/acquisition/fetch.py gaia-dr3 --set limit=50000 --set g_max=9.5
+    python data/acquisition/fetch.py gfs --set end=now+3d --set stride=1
     python data/acquisition/fetch.py --record                      # record checksums of a first retrieval
 """
 
@@ -33,8 +46,10 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import re
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -44,7 +59,12 @@ CACHE = DATA / "cache"
 CHUNK = 1 << 20
 
 sys.path.insert(0, str(DATA / "catalogs"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import erddap  # noqa: E402
 import tap  # noqa: E402
+
+UTC = dt.timezone.utc
+RELATIVE_TIME = re.compile(r"^(now|today|last)(?:\s*([+-])\s*(\d+(?:\.\d+)?)\s*([hd]))?$")
 
 
 def sha256_of(path: Path) -> str:
@@ -112,8 +132,42 @@ def acquire_files(path: Path, manifest: dict, record: bool) -> bool:
 
 # ---- queries ----------------------------------------------------------------
 
+def resolve_time(expr: str, present: dt.datetime, last: dt.datetime | None = None) -> dt.datetime:
+    """An instant (UTC) from an ISO 8601 text or a relative expression.
+
+    'now' is the present rounded down to the hour, so that retrievals within the
+    same hour ask for the same data; 'today' is 00:00 UTC of the present day;
+    'last' is the last time of the dataset. A text without an offset is UTC.
+    """
+    m = RELATIVE_TIME.match(expr.strip().lower())
+    if m:
+        anchor, sign, amount, unit = m.groups()
+        if anchor == "now":
+            base = present.replace(minute=0, second=0, microsecond=0)
+        elif anchor == "today":
+            base = present.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif last is None:
+            raise ValueError("'last' refers to the end of a dataset, which is not known here")
+        else:
+            base = last
+        if sign:
+            delta = dt.timedelta(hours=float(amount) * (24 if unit == "d" else 1))
+            base = base + delta if sign == "+" else base - delta
+        return base
+    t = dt.datetime.fromisoformat(expr.strip().replace("Z", "+00:00"))
+    return (t if t.tzinfo else t.replace(tzinfo=UTC)).astimezone(UTC)
+
+
 def coerce(name: str, spec: dict, raw):
     kind = spec.get("type", "str")
+    if kind == "time":
+        try:
+            epoch = dt.datetime(2000, 1, 1, tzinfo=UTC)
+            resolve_time(str(raw), epoch, epoch)
+        except ValueError:
+            raise SystemExit(f"parameter {name}: expected an ISO 8601 time or an expression such as "
+                             f"now-1d, today or last, got {raw!r}") from None
+        return str(raw)
     try:
         value = int(raw) if kind == "int" else float(raw) if kind == "float" else str(raw)
     except ValueError:
@@ -146,7 +200,7 @@ def resolve(manifest: dict, profile: str | None, overrides: dict) -> tuple[dict,
     return values, tag
 
 
-def acquire_query(manifest: dict, profile: str | None, overrides: dict, refresh: bool) -> bool:
+def acquire_tap(manifest: dict, profile: str | None, overrides: dict, refresh: bool) -> bool:
     values, tag = resolve(manifest, profile, overrides)
     folder = CACHE / manifest["id"] / tag
     dest = folder / manifest.get("file", "result.csv")
@@ -186,35 +240,162 @@ def acquire_query(manifest: dict, profile: str | None, overrides: dict, refresh:
     return True
 
 
+# ---- gridded subsets (ERDDAP) and web requests ------------------------------
+
+def fill(template, values: dict):
+    """Fills '{name}' placeholders; a template that is one placeholder keeps the value's type."""
+    if not isinstance(template, str):
+        return template
+    whole = re.fullmatch(r"\{(\w+)\}", template)
+    return values[whole.group(1)] if whole else template.format(**values)
+
+
+def cached(folder: Path, urls: list[str], files: list[str]) -> bool:
+    provenance = folder / "retrieval.json"
+    if not provenance.exists() or not all((folder / f).exists() for f in files):
+        return False
+    return [r["url"] for r in load(provenance).get("requests", [])] == urls
+
+
+def write_provenance(folder: Path, manifest: dict, tag: str, values: dict, resolved: dict,
+                     requests: list[dict], started: float) -> None:
+    for r in requests:
+        path = folder / r["file"]
+        r["size"], r["sha256"] = path.stat().st_size, sha256_of(path)
+    (folder / "retrieval.json").write_text(json.dumps({
+        "dataset": manifest["id"],
+        "profile": tag,
+        "parameters": values,
+        "resolved": resolved,
+        "requests": requests,
+        "retrieved_at": now(),
+        "elapsed_s": round(time.monotonic() - started, 1),
+    }, indent=2) + "\n", encoding="utf-8")
+
+
+def griddap_request(manifest: dict, values: dict, present: dt.datetime) -> tuple[str, dict]:
+    """The request URL for a griddap dataset, and the resolved axes for provenance."""
+    service, dataset = manifest["service"], manifest["dataset"]
+    meta = erddap.info(service, dataset)
+    variables = [v.strip() for v in str(fill(manifest["variables"], values)).split(",") if v.strip()]
+    unknown = [v for v in variables if v not in meta["variables"]]
+    if unknown:
+        raise erddap.ErddapError(f"unknown variable(s) {', '.join(unknown)}; "
+                                 f"the dataset has {', '.join(meta['variables'])}")
+    axes, resolved = [], {"variables": variables}
+    for spec in manifest["axes"]:
+        spec = {k: fill(v, values) for k, v in spec.items()}
+        if spec["name"] != "time":
+            axes.append(spec)
+            resolved[spec["name"]] = {k: spec[k] for k in ("from", "to", "stride") if k in spec}
+            continue
+        first = erddap.parse_time(meta["global"]["time_coverage_start"])
+        last = erddap.parse_time(meta["global"]["time_coverage_end"])
+        start = resolve_time(str(spec["from"]), present, last)
+        stop = resolve_time(str(spec.get("to", spec["from"])), present, last)
+        start, stop = max(start, first), min(stop, last)
+        if start > stop:
+            raise erddap.ErddapError(f"the requested times lie outside the dataset "
+                                     f"({erddap.iso(first)} to {erddap.iso(last)})")
+        step = int(spec.get("step_hours", 1))
+        times = erddap.time_values(service, dataset, start, stop)
+        t0, t1, stride, count = erddap.select_times(times, step)
+        axes.append({"name": "time", "from": erddap.iso(t0), "to": erddap.iso(t1), "stride": stride})
+        resolved["time"] = {"first": erddap.iso(t0), "last": erddap.iso(t1), "count": count,
+                            "step_hours": step, "dataset_end": erddap.iso(last)}
+    return erddap.request_url(service, dataset, variables, axes), resolved
+
+
+def acquire_griddap(manifest: dict, profile: str | None, overrides: dict, refresh: bool) -> bool:
+    values, tag = resolve(manifest, profile, overrides)
+    folder = CACHE / manifest["id"] / tag
+    name = manifest.get("file", "data.nc")
+    print(f"  profile {tag}: " + ", ".join(f"{k}={v}" for k, v in values.items()))
+    started = time.monotonic()
+    try:
+        url, resolved = griddap_request(manifest, values, dt.datetime.now(UTC))
+    except (erddap.ErddapError, urllib.error.URLError, OSError) as error:
+        if (folder / name).exists():
+            print(f"  the service could not be reached ({error}); keeping the cached retrieval")
+            return True
+        print(f"  REQUEST FAILED: {error}")
+        return False
+    if "time" in resolved:
+        t = resolved["time"]
+        print(f"  times {t['first']} to {t['last']}: {t['count']} step(s) of {t['step_hours']} h")
+    if cached(folder, [url], [name]) and not refresh:
+        print(f"  cached in {folder.relative_to(DATA.parent)}")
+        return True
+    folder.mkdir(parents=True, exist_ok=True)
+    try:
+        download(url, folder / name)
+    except (urllib.error.URLError, OSError) as error:
+        print(f"  DOWNLOAD FAILED: {error}")
+        return False
+    write_provenance(folder, manifest, tag, values, resolved, [{"url": url, "file": name}], started)
+    print(f"  {(folder / name).stat().st_size / 1e6:.1f} MB in {folder.relative_to(DATA.parent)}")
+    return True
+
+
+def acquire_http(manifest: dict, profile: str | None, overrides: dict, refresh: bool) -> bool:
+    values, tag = resolve(manifest, profile, overrides)
+    folder = CACHE / manifest["id"] / tag
+    print(f"  profile {tag}: " + ", ".join(f"{k}={v}" for k, v in values.items()))
+    present = dt.datetime.now(UTC)
+    filled = {k: resolve_time(v, present) if manifest["parameters"][k].get("type") == "time" else v
+              for k, v in values.items()}
+    requests = [{"url": r["url"].format(**filled), "file": r["file"]} for r in manifest["requests"]]
+    resolved = {k: erddap.iso(v) for k, v in filled.items() if isinstance(v, dt.datetime)}
+    if cached(folder, [r["url"] for r in requests], [r["file"] for r in requests]) and not refresh:
+        print(f"  cached in {folder.relative_to(DATA.parent)}")
+        return True
+    folder.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
+    for r in requests:
+        try:
+            download(r["url"], folder / r["file"])
+        except (urllib.error.URLError, OSError) as error:
+            print(f"  REQUEST FAILED: {r['url']}: {error}")
+            return False
+    write_provenance(folder, manifest, tag, values, resolved, requests, started)
+    total = sum((folder / r["file"]).stat().st_size for r in requests)
+    print(f"  {len(requests)} file(s), {total / 1e6:.2f} MB in {folder.relative_to(DATA.parent)}")
+    return True
+
+
+ACQUIRE = {"tap": acquire_tap, "griddap": acquire_griddap, "http": acquire_http}
+
+
 # ---- listing ----------------------------------------------------------------
 
 def describe(manifest: dict) -> None:
     kind = manifest.get("kind", "files")
-    print(f"{manifest['id']:30s} {kind:6s} {manifest['title']}")
+    print(f"{manifest['id']:30s} {kind:8s} {manifest['title']}")
     if kind == "files":
         total = sum(f.get("size") or 0 for f in manifest["files"])
-        print(f"{'':37s}{len(manifest['files'])} file(s), {total / 1e6:.1f} MB")
+        print(f"{'':39s}{len(manifest['files'])} file(s), {total / 1e6:.1f} MB")
         return
-    print(f"{'':37s}parameters:")
+    print(f"{'':39s}parameters:")
     for name, spec in manifest["parameters"].items():
-        bounds = f"{spec.get('min')}..{spec.get('max')}" if "min" in spec else ""
-        print(f"{'':39s}{name} = {spec['default']} ({spec.get('type', 'str')} {bounds}) {spec['description']}")
-    print(f"{'':37s}profiles:")
+        bounds = f" {spec.get('min')}..{spec.get('max')}" if "min" in spec else ""
+        print(f"{'':41s}{name} = {spec['default']} ({spec.get('type', 'str')}{bounds}) {spec['description']}")
+    print(f"{'':39s}profiles:")
     for name, profile in manifest.get("profiles", {}).items():
         mark = " (default)" if name == manifest.get("default_profile") else ""
-        print(f"{'':39s}{name}{mark}: {profile['description']}")
+        print(f"{'':41s}{name}{mark}: {profile['description']}")
 
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("datasets", nargs="*", help="dataset ids (default: every 'files' dataset)")
     parser.add_argument("--list", action="store_true", help="list datasets, their parameters and profiles")
-    parser.add_argument("--profile", help="profile of a query dataset")
+    parser.add_argument("--profile", help="profile of a parameterised dataset")
     parser.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
-                        help="override a parameter of a query dataset (repeatable)")
+                        help="override a parameter of a parameterised dataset (repeatable)")
     parser.add_argument("--refresh", action="store_true", help="query again even if a cached result exists")
     parser.add_argument("--record", action="store_true", help="record checksums of first retrieval")
     args = parser.parse_args(argv)
+    sys.stdout.reconfigure(errors="replace")     # consoles that cannot show ′, ° or CJK
 
     manifests = {p.stem: p for p in sorted(REGISTRY.glob("*.json"))}
     if args.list:
@@ -242,10 +423,11 @@ def main(argv: list[str]) -> int:
     for ident in chosen:
         manifest = load(manifests[ident])
         print(f"{ident}: {manifest['title']}")
-        if manifest.get("kind", "files") == "tap":
-            ok &= acquire_query(manifest, args.profile, overrides, args.refresh)
-        else:
+        kind = manifest.get("kind", "files")
+        if kind == "files":
             ok &= acquire_files(manifests[ident], manifest, args.record)
+        else:
+            ok &= ACQUIRE[kind](manifest, args.profile, overrides, args.refresh)
     return 0 if ok else 1
 
 
