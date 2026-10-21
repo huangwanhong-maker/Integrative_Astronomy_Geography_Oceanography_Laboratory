@@ -38,7 +38,7 @@ All kinds except `files` declare parameters and profiles, so that a user chooses
 
 ## 3. Fields of `files` Datasets
 
-`files` is a list of `{url, file, size, sha256}`. A `null` checksum marks a file never verified; run `fetch.py --record` once to record it. Prefer URLs pinned to a release (for example a git tag), so that checksums stay valid. A file may carry further fields that its product builder reads; for example, `solar-system-maps` names the `body` each map shows, and `koppen-geiger` the `period` and `scenario` of each map.
+`files` is a list of `{url, file, size, sha256}`. A `null` checksum marks a file never verified; run `fetch.py --record` once to record it. Prefer URLs pinned to a release (for example a git tag), so that checksums stay valid. A file may carry further fields that its product builder reads; for example, `solar-system-maps` names the `body` each map shows, and `koppen-geiger` the `period` and `scenario` of each map. A map may also name a tile service for detail at close range (`live`: a WMTS template and its levels), which its product passes on.
 
 A file with a `member` is that member of the zip archive at `url`. The fetcher reads the archive's directory and the member by HTTP range requests, without downloading the archive; the checksum is the member's.
 

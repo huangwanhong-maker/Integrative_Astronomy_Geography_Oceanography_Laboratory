@@ -17,7 +17,15 @@
       "file": "Solarsystemscope_texture_8k_mercury.jpg",
       "body": "mercury",
       "size": 15035740,
-      "sha256": "5c8bd885ae3571c6ba2cd34b3446b9c6d767e314bf0ee8c1d5c147cadd388fc3"
+      "sha256": "5c8bd885ae3571c6ba2cd34b3446b9c6d767e314bf0ee8c1d5c147cadd388fc3",
+      "live": {
+        "kind": "wmts",
+        "template": "https://trek.nasa.gov/tiles/Mercury/EQ/Mercury_MESSENGER_MDIS_Basemap_EnhancedColor_Mosaic_Global_665m/1.0.0/default/default028mm/{z}/{row}/{col}.jpg",
+        "tile": 256,
+        "levels": 7,
+        "matrix": "level z: 2^(z+1) columns by 2^z rows of tiles, from 180 W and 90 N; east longitude",
+        "credit": "MESSENGER MDIS enhanced-colour mosaic, 665 m (NASA/JHUAPL/Carnegie Institution), via NASA Mercury Trek"
+      }
     },
     {
       "url": "https://upload.wikimedia.org/wikipedia/commons/5/57/Solarsystemscope_texture_4k_venus_atmosphere.jpg",
@@ -31,14 +39,30 @@
       "file": "Solarsystemscope_texture_8k_moon.jpg",
       "body": "moon",
       "size": 15030356,
-      "sha256": "d1875bcec83588ca25e4802e576f6bb9f88b39e1e403cb41ff55867419c54796"
+      "sha256": "d1875bcec83588ca25e4802e576f6bb9f88b39e1e403cb41ff55867419c54796",
+      "live": {
+        "kind": "wmts",
+        "template": "https://trek.nasa.gov/tiles/Moon/EQ/LRO_WAC_Mosaic_Global_303ppd_v02/1.0.0/default/default028mm/{z}/{row}/{col}.jpg",
+        "tile": 256,
+        "levels": 8,
+        "matrix": "level z: 2^(z+1) columns by 2^z rows of tiles, from 180 W and 90 N; east longitude",
+        "credit": "LRO WAC global mosaic, 303 pixels per degree (NASA/GSFC/Arizona State University), via NASA Moon Trek"
+      }
     },
     {
       "url": "https://upload.wikimedia.org/wikipedia/commons/7/70/Solarsystemscope_texture_8k_mars.jpg",
       "file": "Solarsystemscope_texture_8k_mars.jpg",
       "body": "mars",
       "size": 8396951,
-      "sha256": "4cc52149924abc6ae507d63032f994e1d42a55cb82c09e002d1a567ff66c23ee"
+      "sha256": "4cc52149924abc6ae507d63032f994e1d42a55cb82c09e002d1a567ff66c23ee",
+      "live": {
+        "kind": "wmts",
+        "template": "https://trek.nasa.gov/tiles/Mars/EQ/Mars_Viking_MDIM21_ClrMosaic_global_232m/1.0.0/default/default028mm/{z}/{row}/{col}.jpg",
+        "tile": 256,
+        "levels": 7,
+        "matrix": "level z: 2^(z+1) columns by 2^z rows of tiles, from 180 W and 90 N; east longitude",
+        "credit": "Viking MDIM 2.1 colour mosaic, 232 m (NASA/USGS), via NASA Mars Trek"
+      }
     },
     {
       "url": "https://upload.wikimedia.org/wikipedia/commons/5/5e/Solarsystemscope_texture_8k_jupiter.jpg",
@@ -83,7 +107,7 @@
       "sha256": "1fd005ddd6d53364cc5106e0121b83fd3bca236b1503f6b51f5501d9d51eafaf"
     }
   ],
-  "format": "JPEG or PNG, equirectangular. Bodies: east longitude from -180 at the left to 180 at the right, 0 at the centre, north at the top (planetocentric). Milky Way: galactic coordinates, longitude 0 at the centre increasing to the left, the south galactic pole at the top. Saturn's rings: a radial strip from the inner edge of the C ring to the outer edge of the A ring, with transparency.",
+  "format": "JPEG or PNG, equirectangular. Bodies: east longitude from -180 at the left to 180 at the right, 0 at the centre, north at the top (planetocentric). Milky Way: galactic coordinates, longitude 0 at the centre increasing to the left, the south galactic pole at the top. Saturn's rings: a radial strip from the inner edge of the C ring to the outer edge of the A ring, with transparency. The Moon, Mars and Mercury also name a tile service (WMTS, equirectangular) for detail at close range.",
   "coverage": "The Sun, Mercury, Venus (its clouds), the Moon, Mars, Jupiter, Saturn and its rings, Uranus, Neptune; the whole sky",
   "licence": "CC BY 4.0 (Solar System Scope textures)",
   "citation": "Solar System Scope textures (https://www.solarsystemscope.com/textures/), CC BY 4.0, based on NASA, JPL and ESA mission data.",

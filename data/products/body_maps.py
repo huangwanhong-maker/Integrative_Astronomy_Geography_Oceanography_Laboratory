@@ -7,7 +7,10 @@ Each map becomes an imagery product (see imagery.py) with a role:
 - `sky`: the whole sky in galactic coordinates.
 
 Maps wider than 4096 pixels are resampled to 4096, which a graphics card holds
-easily; the sky keeps 8192 (it spans the whole field of view).
+easily; the sky keeps 8192 (it spans the whole field of view). A body whose
+manifest entry names a tile service (`live`: NASA's Trek WMTS for the Moon,
+Mars and Mercury) passes it on, so that an application can show detail at
+close range.
 
 The sky map's orientation is checked rather than assumed. The brightest
 pixels near twelve bright stars of known galactic position are read under the
@@ -87,6 +90,8 @@ def build() -> list[dict]:
         }
         if role == "body":
             product["projection"] = "equirectangular; east longitude -180 to 180 from left to right, 0 at the centre; north at the top"
+            if entry.get("live"):
+                product["live"] = entry["live"]
         elif role == "rings":
             product["projection"] = "radial strip: from the inner edge of the C ring (left) to the outer edge of the A ring (right)"
             product["radii_km"] = [74500, 136780]
