@@ -16,6 +16,10 @@ A dataset is described by a manifest in ``data/registry/`` (schema:
 ``http``
     One or more web requests built from URL templates, such as the World
     Bank's indicators or the USGS earthquake catalogue.
+``ncss``
+    Subsets of a forecast model's collection on a THREDDS server, through its
+    NetCDF Subset Service: groups of variables at chosen levels, times and
+    grid spacing, such as the GFS at 500 hPa or NOAA's AI model AIGFS.
 
 Every kind except ``files`` declares parameters (which part of the data and how
 much of it) and named profiles. A retrieval chooses a profile and may override
@@ -61,6 +65,7 @@ CHUNK = 1 << 20
 sys.path.insert(0, str(DATA / "catalogs"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import erddap  # noqa: E402
+import ncss  # noqa: E402
 import tap  # noqa: E402
 
 UTC = dt.timezone.utc
@@ -85,11 +90,24 @@ def load(path: Path) -> dict:
 
 # ---- fixed files ------------------------------------------------------------
 
-def download(url: str, dest: Path) -> None:
+def download(url: str, dest: Path, timeout: int = 60, attempts: int = 1) -> None:
+    """Downloads url to dest, through a .part file; retries on failure."""
+    for attempt in range(1, attempts + 1):
+        try:
+            _download(url, dest, timeout)
+            return
+        except (urllib.error.URLError, OSError) as error:
+            if attempt == attempts:
+                raise
+            print(f"  attempt {attempt} failed ({error}); trying again")
+            time.sleep(10 * attempt)
+
+
+def _download(url: str, dest: Path, timeout: int) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_name(dest.name + ".part")
     request = urllib.request.Request(url, headers={"User-Agent": "laboratory-data-fetch/1"})
-    with urllib.request.urlopen(request, timeout=60) as response, part.open("wb") as out:
+    with urllib.request.urlopen(request, timeout=timeout) as response, part.open("wb") as out:
         total = int(response.headers.get("Content-Length") or 0)
         done = 0
         for block in iter(lambda: response.read(CHUNK), b""):
@@ -328,7 +346,8 @@ def acquire_griddap(manifest: dict, profile: str | None, overrides: dict, refres
         return True
     folder.mkdir(parents=True, exist_ok=True)
     try:
-        download(url, folder / name)
+        # ERDDAP may compute a large subset for minutes before sending a byte.
+        download(url, folder / name, timeout=900, attempts=2)
     except (urllib.error.URLError, OSError) as error:
         print(f"  DOWNLOAD FAILED: {error}")
         return False
@@ -353,7 +372,7 @@ def acquire_http(manifest: dict, profile: str | None, overrides: dict, refresh: 
     started = time.monotonic()
     for r in requests:
         try:
-            download(r["url"], folder / r["file"])
+            download(r["url"], folder / r["file"], timeout=300, attempts=2)
         except (urllib.error.URLError, OSError) as error:
             print(f"  REQUEST FAILED: {r['url']}: {error}")
             return False
@@ -363,7 +382,50 @@ def acquire_http(manifest: dict, profile: str | None, overrides: dict, refresh: 
     return True
 
 
-ACQUIRE = {"tap": acquire_tap, "griddap": acquire_griddap, "http": acquire_http}
+def acquire_ncss(manifest: dict, profile: str | None, overrides: dict, refresh: bool) -> bool:
+    """Groups of variables from a THREDDS collection, one request (and file) per group.
+
+    Times run from start to end every step_hours, aligned to 00:00 UTC; the
+    collection's own step (time_step_hours in the manifest) sets the stride.
+    """
+    values, tag = resolve(manifest, profile, overrides)
+    folder = CACHE / manifest["id"] / tag
+    print(f"  profile {tag}: " + ", ".join(f"{k}={v}" for k, v in values.items()))
+    present = dt.datetime.now(UTC)
+    step = int(values.get("step_hours", manifest.get("time_step_hours", 3)))
+    native = int(manifest.get("time_step_hours", 3))
+    if step % native:
+        print(f"  step_hours must be a multiple of {native}")
+        return False
+    start = ncss.align(resolve_time(values["start"], present), step, up=True)
+    end = ncss.align(resolve_time(values["end"], present), step)
+    stride = int(values.get("stride", 1))
+    requests = []
+    for group in manifest["groups"]:
+        url = ncss.request_url(manifest["service"], manifest["dataset"], group["variables"], start, end,
+                               step // native, stride, group.get("vertCoord"))
+        requests.append({"url": url, "file": group["file"], "level": group.get("level")})
+    resolved = {"start": erddap.iso(start), "end": erddap.iso(end), "step_hours": step}
+    print(f"  times {resolved['start']} to {resolved['end']} every {step} h; {len(requests)} request(s)")
+    if cached(folder, [r["url"] for r in requests], [r["file"] for r in requests]) and not refresh:
+        print(f"  cached in {folder.relative_to(DATA.parent)}")
+        return True
+    folder.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
+    for r in requests:
+        print(f"  {r['file']}: requesting (the server may take minutes to cut the subset)")
+        try:
+            download(r["url"], folder / r["file"], timeout=900, attempts=3)
+        except (urllib.error.URLError, OSError) as error:
+            print(f"  REQUEST FAILED: {r['file']}: {error}")
+            return False
+    write_provenance(folder, manifest, tag, values, resolved, requests, started)
+    total = sum((folder / r["file"]).stat().st_size for r in requests)
+    print(f"  {len(requests)} file(s), {total / 1e6:.1f} MB in {folder.relative_to(DATA.parent)}")
+    return True
+
+
+ACQUIRE = {"tap": acquire_tap, "griddap": acquire_griddap, "http": acquire_http, "ncss": acquire_ncss}
 
 
 # ---- listing ----------------------------------------------------------------

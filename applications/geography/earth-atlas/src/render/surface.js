@@ -1,13 +1,14 @@
-// The Earth's surface as drawn by the GPU: the base map, one data layer (a
-// field or a choropleth of countries), and day and night, on the globe or on a
-// flat map.
+// The Earth's surface as drawn by the GPU: the base map (relief or imagery,
+// with finer detail where the user looks), lights at night, forecast clouds,
+// one data layer (a field, a difference of two fields, or a choropleth of
+// countries), and day and night, on the globe or on a flat map.
 //
 // One fragment shader serves every projection. For the globe it reads the
 // place from the sphere's surface; for a flat map it inverts the projection at
 // each pixel (transcribing src/core/projections.js). It then samples, at that
-// place, the base image, the data and the Sun's altitude. Fields are sampled
-// from float textures holding the grid exactly as stored, with the bilinear rule
-// of src/core/grid.js (weights renormalised beside missing values) and linear
+// place, the base, the data and the Sun's altitude. Fields are sampled from
+// float textures holding the grid exactly as stored, with the bilinear rule of
+// src/core/grid.js (weights renormalised beside missing values) and linear
 // interpolation between two times, so the GPU draws what the probe reports.
 
 import * as THREE from 'three';
@@ -35,18 +36,33 @@ out vec4 fragColor;
 uniform int uProjection;          // 0 globe, 1 equirectangular, 2 Equal Earth
 uniform float uLambda0;           // central meridian, radians
 uniform vec2 uExtent;             // half-width and half-height of the map
-uniform sampler2D uBase;          // RGB: tinted, shaded relief; A: shading x 127.5
-uniform int uMode;                // 0 none, 1 scalar field, 2 magnitude of a vector field, 3 countries
+
+uniform sampler2D uBase;          // relief: RGB tinted and shaded; A: shading x 127.5
+uniform sampler2D uImagery;       // imagery of the surface by day (RGB), black where there is none
+uniform float uImageryOn;
+uniform sampler2D uLights;        // lights at night
+uniform float uLightsOn;
+uniform sampler2D uDetail;        // finer imagery or relief of one region
+uniform vec4 uDetailBox;          // west longitude, south latitude, width, height (degrees)
+uniform float uDetailOn;
+
+uniform int uMode;                // 0 none, 1 field, 2 speed of a vector, 3 countries, 4 difference A - B
 uniform sampler2D uA0, uA1, uB0, uB1;
-uniform float uMix;               // weight of the later time
-uniform vec4 uGrid;               // lon0, dlon, lat0, dlat (degrees)
-uniform ivec3 uGridN;             // nlon, nlat, periodic
+uniform float uMix, uMixB;        // weights of the later time, for A and for B
+uniform vec4 uGrid, uGridB;       // lon0, dlon, lat0, dlat (degrees)
+uniform ivec3 uGridN, uGridNB;    // nlon, nlat, periodic
 uniform sampler2D uLut;
 uniform vec3 uRange;              // low, high (stored units), scale: 0 linear, 1 logarithmic, 2 square root
 uniform float uOpacity;
 uniform float uReliefOnData;
 uniform usampler2D uCountries;    // 1 + index of the country at each pixel, 0 for none
 uniform sampler2D uCountryColours;
+
+uniform sampler2D uC0, uC1;       // cloud cover (%)
+uniform float uMixC, uCloudOn;
+uniform vec4 uGridC;
+uniform ivec3 uGridNC;
+
 uniform vec3 uSun;                // unit vector toward the Sun, Earth-fixed
 uniform float uNight;             // 0 none, 1 full
 uniform vec3 uNightTint;
@@ -71,18 +87,18 @@ vec2 equalEarthInverse(vec2 p) {
 float cell(sampler2D t, int c, int r) { return texelFetch(t, ivec2(c, r), 0).r; }
 
 // Bilinear interpolation with renormalised weights (src/core/grid.js).
-float fieldAt(sampler2D t, vec2 ll) {
-  float nlon = float(uGridN.x), nlat = float(uGridN.y);
-  float x = (ll.x - uGrid.x) / uGrid.y;
-  if (uGridN.z == 1) x = mod(x, nlon);
+float fieldAt(sampler2D t, vec2 ll, vec4 grid, ivec3 gridN) {
+  float nlon = float(gridN.x), nlat = float(gridN.y);
+  float x = (ll.x - grid.x) / grid.y;
+  if (gridN.z == 1) x = mod(x, nlon);
   else if (x < -0.5 || x > nlon - 0.5) return MISSING;
-  float y = (uGrid.z - ll.y) / uGrid.w;
+  float y = (grid.z - ll.y) / grid.w;
   if (y < -0.5 || y > nlat - 0.5) return MISSING;
   y = clamp(y, 0.0, nlat - 1.0);
   int c0 = int(floor(x)), r0 = int(floor(y));
   float fx = x - float(c0), fy = y - float(r0);
-  int c1 = c0 + 1, r1 = min(r0 + 1, uGridN.y - 1);
-  if (c1 >= uGridN.x) c1 = uGridN.z == 1 ? c1 - uGridN.x : uGridN.x - 1;
+  int c1 = c0 + 1, r1 = min(r0 + 1, gridN.y - 1);
+  if (c1 >= gridN.x) c1 = gridN.z == 1 ? c1 - gridN.x : gridN.x - 1;
   c0 = max(c0, 0);
   vec4 v = vec4(cell(t, c0, r0), cell(t, c1, r0), cell(t, c0, r1), cell(t, c1, r1));
   vec4 w = vec4((1.0 - fx) * (1.0 - fy), fx * (1.0 - fy), (1.0 - fx) * fy, fx * fy);
@@ -92,11 +108,11 @@ float fieldAt(sampler2D t, vec2 ll) {
   return dot(w * ok, v) / weight;
 }
 
-float atTime(sampler2D t0, sampler2D t1, vec2 ll) {
-  float a = fieldAt(t0, ll);
-  if (uMix <= 0.0 || a < MISSING) return a;
-  float b = fieldAt(t1, ll);
-  return b < MISSING ? MISSING : mix(a, b, uMix);
+float atTime(sampler2D t0, sampler2D t1, float mixT, vec2 ll, vec4 grid, ivec3 gridN) {
+  float a = fieldAt(t0, ll, grid, gridN);
+  if (mixT <= 0.0 || a < MISSING) return a;
+  float b = fieldAt(t1, ll, grid, gridN);
+  return b < MISSING ? MISSING : mix(a, b, mixT);
 }
 
 vec4 colourOf(float v) {
@@ -117,6 +133,16 @@ float darkness(float alt) {
   return d;
 }
 
+// A texture sampled with gradients taken across the seam at 180 degrees, so
+// that the mipmap level does not jump there.
+vec4 seamless(sampler2D t, vec2 uv) {
+  vec2 uvs = vec2(fract(uv.x + 0.5), uv.y);
+  vec2 dx = dFdx(uv), dy = dFdy(uv), dxs = dFdx(uvs), dys = dFdy(uvs);
+  if (abs(dxs.x) < abs(dx.x)) dx.x = dxs.x;
+  if (abs(dys.x) < abs(dy.x)) dy.x = dys.x;
+  return textureGrad(t, uv, dx, dy);
+}
+
 void main() {
   vec3 earth;
   vec2 ll;
@@ -132,27 +158,56 @@ void main() {
     ll = vec2(lon, lp.y) * (180.0 / PI);
   }
 
-  // The base image, with gradients taken across the seam at 180 degrees so that
-  // the mipmap level does not jump there.
   vec2 uv = vec2((ll.x + 180.0) / 360.0, (90.0 - ll.y) / 180.0);
-  vec2 uvs = vec2(fract(uv.x + 0.5), uv.y);
-  vec2 dx = dFdx(uv), dy = dFdy(uv), dxs = dFdx(uvs), dys = dFdy(uvs);
-  if (abs(dxs.x) < abs(dx.x)) dx.x = dxs.x;
-  if (abs(dys.x) < abs(dy.x)) dy.x = dys.x;
-  vec4 base = textureGrad(uBase, uv, dx, dy);
-  float shade = base.a * 2.0;
+  vec4 relief = seamless(uBase, uv);
+  vec3 colour = relief.rgb;
+  float shade = relief.a * 2.0;
+  if (uImageryOn > 0.5) {
+    vec3 img = seamless(uImagery, uv).rgb;
+    // Where the imagery has no data (black), the relief shows through.
+    float has = smoothstep(0.012, 0.05, max(img.r, max(img.g, img.b)));
+    colour = mix(colour, img, has);
+  }
+  if (uDetailOn > 0.0) {
+    float dl = mod(ll.x - uDetailBox.x + 360.0, 360.0);
+    vec2 duv = vec2(dl / uDetailBox.z, (uDetailBox.y + uDetailBox.w - ll.y) / uDetailBox.w);
+    if (duv.x >= 0.0 && duv.x <= 1.0 && duv.y >= 0.0 && duv.y <= 1.0) {
+      vec3 d = texture(uDetail, duv).rgb;
+      float edge = smoothstep(0.0, 0.04, min(min(duv.x, 1.0 - duv.x), min(duv.y, 1.0 - duv.y)));
+      float has = smoothstep(0.012, 0.05, max(d.r, max(d.g, d.b)));
+      colour = mix(colour, d, edge * has * uDetailOn);
+    }
+  }
+
   float alt = asin(clamp(dot(earth, uSun), -1.0, 1.0)) * (180.0 / PI);
   float dark = darkness(alt) * uNight;
   // Night darkens the map fully, and data drawn over it by half, so that
   // values stay readable on the night side.
-  vec3 colour = base.rgb * mix(vec3(1.0), uNightTint, dark);
+  colour *= mix(vec3(1.0), uNightTint, dark);
   vec3 dataNight = mix(vec3(1.0), uNightTint, dark * 0.5);
+  if (uLightsOn > 0.5 && dark > 0.05) {
+    vec3 lights = seamless(uLights, uv).rgb;
+    float lum = dot(lights, vec3(0.30, 0.55, 0.15));
+    colour += vec3(1.0, 0.80, 0.52) * pow(lum, 1.35) * 1.5 * smoothstep(0.2, 0.75, dark / 1.0);
+  }
 
-  if (uMode == 1 || uMode == 2) {
-    float v = atTime(uA0, uA1, ll);
+  if (uCloudOn > 0.0) {
+    float c = atTime(uC0, uC1, uMixC, ll, uGridC, uGridNC);
+    if (c > MISSING) {
+      float a = pow(smoothstep(15.0, 100.0, c), 1.4) * 0.66 * uCloudOn;
+      vec3 cloud = vec3(0.97, 0.96, 0.99) * mix(vec3(1.0), uNightTint * 0.8, dark);
+      colour = mix(colour, cloud, a);
+    }
+  }
+
+  if (uMode == 1 || uMode == 2 || uMode == 4) {
+    float v = atTime(uA0, uA1, uMix, ll, uGrid, uGridN);
     if (uMode == 2 && v > MISSING) {
-      float w = atTime(uB0, uB1, ll);
+      float w = atTime(uB0, uB1, uMix, ll, uGrid, uGridN);
       v = w > MISSING ? length(vec2(v, w)) : MISSING;
+    } else if (uMode == 4 && v > MISSING) {
+      float w = atTime(uB0, uB1, uMixB, ll, uGridB, uGridNB);
+      v = w > MISSING ? v - w : MISSING;
     }
     if (v > MISSING) {
       vec4 c = colourOf(v);
@@ -181,6 +236,11 @@ function floatTexture(width, height, data) {
 }
 
 const empty = () => floatTexture(1, 1, new Float32Array([GPU_MISSING]));
+const blank = () => {
+  const t = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1, THREE.RGBAFormat);
+  t.needsUpdate = true;
+  return t;
+};
 
 export function createSurfaceMaterial() {
   const lut = new THREE.DataTexture(new Uint8Array(256 * 4), 256, 1, THREE.RGBAFormat);
@@ -202,17 +262,22 @@ export function createSurfaceMaterial() {
       uLambda0: { value: 0 },
       uExtent: { value: new THREE.Vector2(Math.PI, Math.PI / 2) },
       uBase: { value: base },
+      uImagery: { value: blank() }, uImageryOn: { value: 0 },
+      uLights: { value: blank() }, uLightsOn: { value: 0 },
+      uDetail: { value: blank() }, uDetailBox: { value: new THREE.Vector4(0, 0, 1, 1) }, uDetailOn: { value: 0 },
       uMode: { value: 0 },
       uA0: { value: empty() }, uA1: { value: empty() }, uB0: { value: empty() }, uB1: { value: empty() },
-      uMix: { value: 0 },
-      uGrid: { value: new THREE.Vector4(0, 1, 0, 1) },
-      uGridN: { value: new THREE.Vector3(1, 1, 0) },
+      uMix: { value: 0 }, uMixB: { value: 0 },
+      uGrid: { value: new THREE.Vector4(0, 1, 0, 1) }, uGridB: { value: new THREE.Vector4(0, 1, 0, 1) },
+      uGridN: { value: new THREE.Vector3(1, 1, 0) }, uGridNB: { value: new THREE.Vector3(1, 1, 0) },
       uLut: { value: lut },
       uRange: { value: new THREE.Vector3(0, 1, 0) },
       uOpacity: { value: 0.88 },
       uReliefOnData: { value: 0.55 },
       uCountries: { value: countries },
       uCountryColours: { value: colours },
+      uC0: { value: empty() }, uC1: { value: empty() }, uMixC: { value: 0 }, uCloudOn: { value: 0 },
+      uGridC: { value: new THREE.Vector4(0, 1, 0, 1) }, uGridNC: { value: new THREE.Vector3(1, 1, 0) },
       uSun: { value: new THREE.Vector3(1, 0, 0) },
       uNight: { value: 1 },
       uNightTint: { value: new THREE.Color(0.30, 0.27, 0.47) },
@@ -233,6 +298,27 @@ export function setBase(material, rgba, width, height) {
   const old = material.uniforms.uBase.value;
   material.uniforms.uBase.value = t;
   old.dispose();
+}
+
+// An image (HTMLImageElement or canvas) as a global equirectangular texture.
+export function imageTexture(image, renderer, global = true) {
+  const t = new THREE.Texture(image);
+  t.wrapS = global ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+  t.wrapT = THREE.ClampToEdgeWrapping;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.magFilter = THREE.LinearFilter;
+  t.generateMipmaps = true;
+  t.anisotropy = renderer ? Math.min(8, renderer.capabilities.getMaxAnisotropy()) : 4;
+  t.colorSpace = THREE.NoColorSpace;
+  t.needsUpdate = true;
+  return t;
+}
+
+// Sets a sampler uniform, disposing of the texture it held.
+export function setTexture(material, name, texture) {
+  const u = material.uniforms[name];
+  if (u.value && u.value !== texture && u.value.dispose) u.value.dispose();
+  u.value = texture || blank();
 }
 
 export function setLut(material, table) {
@@ -263,7 +349,7 @@ export function setCountryColours(material, colours) {
 
 // A cache of field textures, keyed by product, variable and time index.
 export class FieldTextures {
-  constructor(limit = 24) {
+  constructor(limit = 32) {
     this.limit = limit;
     this.map = new Map();
   }
@@ -284,21 +370,50 @@ export class FieldTextures {
     }
     return t;
   }
+
+  // Forgets the textures of a product whose values have changed.
+  forget(productName) {
+    for (const [k, t] of this.map) if (k.startsWith(`${productName}/`)) { t.dispose(); this.map.delete(k); }
+  }
 }
 
-// Points the material at a field (one variable, or the two components of a vector).
-export function setField(material, textures, product, names, bracket) {
+function gridUniforms(u, suffix, product) {
+  const g = product.grid;
+  u[`uGrid${suffix}`].value.set(g.lon0, g.dlon, g.lat0, g.dlat);
+  u[`uGridN${suffix}`].value.set(g.nlon, g.nlat, g.periodic ? 1 : 0);
+}
+
+// Points the material at a field: one variable (mode 1), the two components of
+// a vector (mode 2), or the difference of two variables of two products (mode 4).
+export function setField(material, textures, product, names, bracket, second = null) {
   const u = material.uniforms;
   const i0 = Math.max(0, bracket.i0), i1 = Math.max(0, bracket.i1);
   u.uA0.value = textures.get(product, names[0], i0);
   u.uA1.value = textures.get(product, names[0], i1);
-  if (names[1]) {
+  u.uMix.value = bracket.w || 0;
+  gridUniforms(u, '', product);
+  if (second) {
+    const j0 = Math.max(0, second.bracket.i0), j1 = Math.max(0, second.bracket.i1);
+    u.uB0.value = textures.get(second.product, second.name, j0);
+    u.uB1.value = textures.get(second.product, second.name, j1);
+    u.uMixB.value = second.bracket.w || 0;
+    gridUniforms(u, 'B', second.product);
+    u.uMode.value = 4;
+  } else if (names[1]) {
     u.uB0.value = textures.get(product, names[1], i0);
     u.uB1.value = textures.get(product, names[1], i1);
+    u.uMode.value = 2;
+  } else {
+    u.uMode.value = 1;
   }
-  u.uMix.value = bracket.w || 0;
-  const g = product.grid;
-  u.uGrid.value.set(g.lon0, g.dlon, g.lat0, g.dlat);
-  u.uGridN.value.set(g.nlon, g.nlat, g.periodic ? 1 : 0);
-  u.uMode.value = names[1] ? 2 : 1;
+}
+
+export function setClouds(material, textures, product, name, bracket, on) {
+  const u = material.uniforms;
+  u.uCloudOn.value = on ? 1 : 0;
+  if (!on || !product) return;
+  u.uC0.value = textures.get(product, name, Math.max(0, bracket.i0));
+  u.uC1.value = textures.get(product, name, Math.max(0, bracket.i1));
+  u.uMixC.value = bracket.w || 0;
+  gridUniforms(u, 'C', product);
 }

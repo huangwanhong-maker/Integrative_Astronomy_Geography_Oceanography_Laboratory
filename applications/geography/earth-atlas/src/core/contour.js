@@ -73,11 +73,13 @@ export function levels(values, step, base = 0) {
 
 // Grid points that are the highest (or lowest) within `radius` cells and differ
 // from the mean of that neighbourhood by at least `prominence`. Rows within
-// `polarRows` of either end are ignored, where the cells converge.
-export function extrema(values, grid, { radius = 6, prominence = 0, polarRows = 4 } = {}) {
+// `polarRows` of either end are ignored, where the cells converge, and so are
+// latitudes below `minAbsLat` (the tropics, where heights are flat).
+export function extrema(values, grid, { radius = 6, prominence = 0, polarRows = 4, minAbsLat = 0 } = {}) {
   const { nlon, nlat } = grid;
   const found = [];
   for (let r = polarRows; r < nlat - polarRows; r++) {
+    if (Math.abs(grid.lat0 - r * grid.dlat) < minAbsLat) continue;
     for (let c = 0; c < nlon; c++) {
       const x = values[r * nlon + c];
       if (x !== x) continue;

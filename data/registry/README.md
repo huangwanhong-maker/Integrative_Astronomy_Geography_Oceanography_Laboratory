@@ -15,7 +15,8 @@ Manifests are read by [`../acquisition/fetch.py`](../acquisition/fetch.py). It d
 | `files` | Fixed files, downloaded as they are. Each file's SHA-256 is recorded in the manifest and verified on every retrieval. | `jpl-de440s`, `natural-earth-50m` |
 | `tap` | A query to an astronomical archive through the IVOA Table Access Protocol | `gaia-dr3`, `ungc`, `tully-2mass-groups` |
 | `griddap` | A subset of a gridded dataset served by ERDDAP: which variables, which times, how fine a grid | `gfs`, `oisst`, `ww3`, `etopo-2022` |
-| `http` | One or more web requests built from URL templates | `worldbank-indicators`, `usgs-earthquakes` |
+| `http` | One or more web requests built from URL templates | `worldbank-indicators`, `usgs-earthquakes`, `gibs-daily`, `gibs-static` |
+| `ncss` | Groups of variables of a forecast model's collection on a THREDDS server, by its NetCDF Subset Service: levels, times and grid spacing | `gfs-levels`, `aigfs`, `aigefs` |
 
 All kinds except `files` declare parameters and profiles, so that a user chooses which part of a dataset to take and how much of it ([ADR 0012](../../development/decisions/0012-selectable-parameterised-datasets.md)).
 
@@ -24,10 +25,11 @@ All kinds except `files` declare parameters and profiles, so that a user chooses
 | Field | Meaning |
 |---|---|
 | `id` | Identifier; also the name of the cache folder |
-| `kind` | `files` (the default), `tap`, `griddap` or `http` |
+| `kind` | `files` (the default), `tap`, `griddap`, `http` or `ncss` |
 | `domain` | The field the data belong to: `astronomy`, `geography`, `oceanography`, `meteorology`, `geophysics`, `climate`. Applications group data by it. |
 | `title`, `provider` | What the dataset is and who produced it |
 | `credit` | A short attribution, shown on maps |
+| `model` | For forecast models: the model's short name (GFS, AIGFS), by which applications offer a choice of model |
 | `format`, `coverage` | Units, frames, epochs, grids; what the data cover |
 | `licence`, `citation` | Terms of use, and how to cite. The project's MIT licence does not cover data. |
 | `used_by` | The applications or modules that depend on the dataset |
@@ -88,7 +90,18 @@ The resolved instants are recorded in the provenance.
 
 `requests` is a list of `{url, file}`. Each URL is a template with `{parameter}` placeholders. A `time` parameter may carry a format, as in `{start:%Y-%m-%dT%H:%M:%S}`.
 
-## 8. Usage
+## 8. Fields of `ncss` Datasets
+
+| Field | Meaning |
+|---|---|
+| `service`, `dataset` | The NCSS endpoint (ending in `/ncss/grid`) and the collection's path, such as `grib/NCEP/GFS/Global_onedeg/Best` |
+| `time_step_hours` | The collection's own time step; `step_hours` must be a multiple of it |
+| `groups` | Requests, each a list of `variables` sharing a coordinate system, with an optional vertical level (`vertCoord`, in the collection's units, such as Pa) and its name (`level`, such as `500 hPa`); one file per group |
+| `attributes` | Standard names and units for the variables, which GRIB-derived collections lack |
+
+Times run from `start` to `end` every `step_hours`, aligned to 00:00 UTC. A product built from the files names each variable with its level, as in `Temperature_isobaric@850hPa`.
+
+## 9. Usage
 
 ```
 python data/acquisition/fetch.py --list                               # datasets, parameters, profiles

@@ -20,6 +20,9 @@ const AFFINE = {
   '%': { unit: '%', a: 1, b: 0 },
   '1': { unit: '', a: 1, b: 0 },
   'W m-2': { unit: 'W/m²', a: 1, b: 0 },
+  'kg m-2': { unit: 'mm', a: 1, b: 0 },                // of liquid water: 1 kg per m^2 is 1 mm
+  'J kg-1': { unit: 'J/kg', a: 1, b: 0 },
+  's-1': { unit: '10⁻⁵ s⁻¹', a: 1e5, b: 0 },           // vorticity, in the unit of synoptic charts
 };
 
 // Alternative units the reader may choose for a quantity stored in given units.

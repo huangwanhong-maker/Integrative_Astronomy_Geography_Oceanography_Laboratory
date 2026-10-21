@@ -21,7 +21,7 @@ Data of different kinds are kept apart ([ADR 0014](../development/decisions/0014
 | Module | Scope | Status |
 |---|---|---|
 | [`registry/`](registry/) | One manifest per dataset: source, licence, checksum or query, parameters, profiles. The schema is in its README. | draft |
-| [`acquisition/`](acquisition/) | `fetch.py`: fixed files, catalogue queries, gridded subsets and web requests into `data/cache/`, with `retrieval.json`. `erddap.py`: a client for ERDDAP's griddap. | draft |
+| [`acquisition/`](acquisition/) | `fetch.py`: fixed files, catalogue queries, gridded subsets and web requests into `data/cache/`, with `retrieval.json`. `erddap.py`: a client for ERDDAP's griddap. `ncss.py`: a client for THREDDS's NetCDF Subset Service. | draft |
 | [`catalogs/`](catalogs/) | `tap.py`: a minimal client for the IVOA Table Access Protocol, used for ESA Gaia, CDS VizieR and SIMBAD | draft |
 | [`formats/`](formats/) | Readers: netCDF classic (`netcdf3.py`). FITS, netCDF-4/HDF5 and Zarr are planned. | draft |
 | [`products/`](products/) | Derived artefacts, built reproducibly from registered datasets, and their index `index.json` (§4) | draft |
@@ -40,6 +40,8 @@ python data/acquisition/fetch.py gfs                             # the latest we
 python data/acquisition/fetch.py worldbank-indicators --profile life-expectancy
 python data/products/star_catalog.py                             # build products (§4)
 python data/products/field_grid.py --source gfs
+python data/acquisition/fetch.py gfs-levels aigfs                # forecast models aloft (THREDDS)
+python data/products/imagery.py --source gibs-daily             # yesterday's Earth from space
 ```
 
 The cache, `data/cache/`, is not under version control.
@@ -56,6 +58,7 @@ Products are written to `data/cache/products/` and listed by kind in `index.json
 | `fields` | `field_grid.py` | Variables on a regular longitude–latitude grid, over time: forecasts, analyses, relief, or our own netCDF files. Rows run north to south; global grids start at 180° W; values in their source units. | `.bin` (int16, a linear scale per variable) and `.json` (grid, times, CF metadata, statistics) |
 | `indicators` | `country_indicators.py` | A value per economy and year, keyed by World Bank codes with ISO alpha-2; aggregates kept apart | `.json` |
 | `events` | `event_catalog.py` | Events at a place and an instant: time, longitude, latitude, depth, magnitude | `.json` |
+| `imagery` | `imagery.py` | Images of the whole Earth, equirectangular: true colour of a day (gaps filled from the day before), the Blue Marble, the Black Marble; with the provider's service for detail | `.jpg` and `.json` |
 
 ## 5. Datasets
 
@@ -76,6 +79,11 @@ Products are written to `data/cache/products/` and listed by kind in `index.json
 | `ww3` | griddap | NOAA NCEP (WaveWatch III), via PacIOOS ERDDAP | Ocean waves: height, period, direction |
 | `worldbank-indicators` | http | The World Bank | Indicators by country and year: population, economy, health, energy, emissions |
 | `usgs-earthquakes` | http | USGS ComCat | Earthquakes by time, place, depth and magnitude |
+| `gfs-levels` | ncss | NOAA NCEP, via Unidata THREDDS | GFS aloft (850, 500, 250 hPa) and over the column (cloud, water vapour, CAPE) |
+| `aigfs` | ncss | NOAA NCEP and EPIC, via Unidata THREDDS | NOAA's AI global forecast model, near the surface and aloft |
+| `aigefs` | ncss | NOAA NCEP and EPIC, via Unidata THREDDS | NOAA's AI ensemble: mean and spread |
+| `gibs-daily` | http | NASA GIBS | Yesterday's Earth from VIIRS, true colour |
+| `gibs-static` | http | NASA GIBS | The Blue Marble by day, the Black Marble by night |
 
 ### 5.2 Planned
 

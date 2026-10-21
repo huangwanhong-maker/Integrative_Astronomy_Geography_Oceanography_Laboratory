@@ -1,5 +1,6 @@
-// The surface layer: one quantity over the whole surface, as a field or as a
-// value per country, coloured by a colour map.
+// The surface layer: one quantity over the whole surface, as a field, as the
+// difference of two models' fields, or as a value per country, coloured by a
+// colour map.
 
 import { lookupTable, colourAt, cssGradient } from '../render/colormaps.js';
 import { FieldTextures, setField, setLut, setCountryColours } from '../render/surface.js';
@@ -57,11 +58,29 @@ export class SurfaceLayer {
     this.info = null;
   }
 
-  async select(def) {
+  // def: the layer; compare: another layer with the same key (another model),
+  // to show def minus compare.
+  async select(def, compare = null, time = Date.now()) {
     this.def = def;
+    this.compare = null;
     this.product = null;
     const u = this.stage.material.uniforms;
     if (!def) { u.uMode.value = 0; return; }
+    if (def.kind === 'field' && compare && compare.kind === 'field' && !def.variables[1]) {
+      const [a, b] = await Promise.all([this.library.field(def.product), this.library.field(compare.product)]);
+      if (this.def !== def) return;
+      this.product = a;
+      this.compare = { def: compare, product: b };
+      const unit = displayUnit(def.units);
+      // A difference: the offset of the units cancels.
+      this.unit = def.percent ? { unit: '%', a: 100, b: 0 } : { unit: unit.unit, a: unit.a, b: 0 };
+      const r = this.differenceRange(time);
+      this.range = [-r, r];
+      this.scale = 'linear';
+      setLut(this.stage.material, lookupTable('balance'));
+      u.uRange.value.set(-r / this.unit.a, r / this.unit.a, 0);
+      return;
+    }
     if (def.kind === 'field') {
       const product = await this.library.field(def.product);
       if (this.def !== def) return;
@@ -98,6 +117,25 @@ export class SurfaceLayer {
     }
   }
 
+  // A symmetric range for a difference: the 98th percentile of its size over a
+  // lattice of places and over the times the two products share, rounded up,
+  // so that the scale holds while time runs.
+  differenceRange(time = Date.now()) {
+    const a = this.product, b = this.compare.product, va = this.def.variables[0], vb = this.compare.def.variables[0];
+    const lo = Math.max(a.times[0] ?? time, b.times[0] ?? time);
+    const hi = Math.min(a.times[a.times.length - 1] ?? time, b.times[b.times.length - 1] ?? time);
+    const times = hi > lo ? [0, 0.25, 0.5, 0.75, 1].map((f) => lo + f * (hi - lo)) : [time];
+    const sizes = [];
+    for (const t of times) for (let lat = -80; lat <= 80; lat += 5) for (let lon = -180; lon < 180; lon += 5) {
+      const d = a.sample(va, t, lon, lat) - b.sample(vb, t, lon, lat);
+      if (Number.isFinite(d)) sizes.push(Math.abs(d) * this.unit.a);
+    }
+    sizes.sort((x, y) => x - y);
+    const p = sizes.length ? sizes[Math.floor(0.98 * (sizes.length - 1))] : 1;
+    const mag = 10 ** Math.floor(Math.log10(p || 1));
+    return [1, 2, 2.5, 5, 10].map((m) => m * mag).find((x) => x >= p) || p;
+  }
+
   paintCountries() {
     const p = this.product, st = this.def.style;
     const colours = new Uint8Array(4 * (this.countries.length + 1));
@@ -131,7 +169,11 @@ export class SurfaceLayer {
     if (!this.def || !this.product) return null;
     if (this.def.kind === 'indicator') return { year: this.year };
     const b = this.product.bracket(time, this.def.variables[0]);
-    setField(this.stage.material, this.textures, this.product, this.def.variables, b);
+    const second = this.compare && {
+      product: this.compare.product, name: this.compare.def.variables[0],
+      bracket: this.compare.product.bracket(time, this.compare.def.variables[0]),
+    };
+    setField(this.stage.material, this.textures, this.product, this.def.variables, b, second);
     this.shown = b;
     return b;
   }
@@ -141,14 +183,15 @@ export class SurfaceLayer {
     if (!this.product || !this.def || this.def.kind !== 'field') return NaN;
     const [a, b] = this.def.variables;
     const x = this.product.sample(a, time, lon, lat);
+    if (this.compare) return x - this.compare.product.sample(this.compare.def.variables[0], time, lon, lat);
     return b ? Math.hypot(x, this.product.sample(b, time, lon, lat)) : x;
   }
 
   legend() {
     if (!this.def || !this.product) return null;
-    const st = this.def.style;
+    const st = this.compare ? { colormap: 'balance' } : this.def.style;
     return {
-      title: this.def.label,
+      title: this.compare ? `${this.def.label}: ${this.def.model} minus ${this.compare.def.model}` : this.def.label,
       unit: this.unit.unit,
       gradient: cssGradient(st.colormap, { reverse: st.reverse, clip: st.clip, fade: st.fade }),
       ticks: ticks(this.range[0], this.range[1], this.scale).map((v) => ({ at: position(v, this.range[0], this.range[1], this.scale), value: v })),

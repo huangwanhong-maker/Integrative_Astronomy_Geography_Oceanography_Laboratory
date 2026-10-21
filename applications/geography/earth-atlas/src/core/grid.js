@@ -159,6 +159,31 @@ export class FieldProduct {
   }
 }
 
+// A field computed in the application (by a model of our own) rather than read
+// from the library: the same interface, with values held as Float32Arrays.
+// slices: { variable name: [Float32Array per time] }.
+export class ComputedField extends FieldProduct {
+  constructor(meta, slices) {
+    super(meta, new ArrayBuffer(0));
+    this.slices = slices;
+  }
+
+  slice(name, ti = 0) {
+    const list = this.slices[name];
+    if (!list) throw new Error(`no variable ${name} in ${this.meta.name}`);
+    return list[Math.max(0, Math.min(list.length - 1, ti))];
+  }
+}
+
+// Summary statistics of a variable, as written by data/products/field_grid.py.
+export function statistics(slices) {
+  const all = [];
+  for (const s of slices) for (let i = 0; i < s.length; i += 7) if (s[i] === s[i]) all.push(s[i]);
+  all.sort((a, b) => a - b);
+  const at = (p) => all[Math.min(all.length - 1, Math.floor(p * (all.length - 1)))];
+  return { min: all[0], max: all[all.length - 1], p02: at(0.02), p98: at(0.98) };
+}
+
 // Area-weighted (cos latitude) mean of a gridded field, ignoring missing values.
 export function areaMean(values, grid) {
   let sum = 0, weight = 0;

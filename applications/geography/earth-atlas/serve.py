@@ -59,6 +59,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             super().log_message(format, *args)
 
 
+class Server(http.server.ThreadingHTTPServer):
+    # The page asks for many products at once; the default backlog of 5
+    # connections makes Windows refuse the rest.
+    request_queue_size = 128
+    daemon_threads = True
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Serve the Earth Atlas locally.")
     parser.add_argument("--port", type=int, default=8790)
@@ -69,7 +76,7 @@ def main(argv: list[str]) -> int:
               "  python data/acquisition/fetch.py natural-earth-50m\n"
               "  python data/products/geography.py\n"
               "and see applications/geography/earth-atlas/README.md for the other data.", file=sys.stderr)
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    server = Server(("127.0.0.1", args.port), Handler)
     url = f"http://127.0.0.1:{args.port}/"
     print(f"Earth Atlas at {url}  (Ctrl+C to stop)", flush=True)
     if args.open:

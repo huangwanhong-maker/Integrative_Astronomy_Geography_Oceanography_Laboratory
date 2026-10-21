@@ -17,6 +17,8 @@ import { ParticleSystem, uniformSpawn } from '../src/core/flow.js';
 import { windFromDirection, compassPoint, deepWaterGroupSpeed, waveEnergyVelocity, meanDirection } from '../src/core/derived.js';
 import { displayUnit, toShown, toStored, format } from '../src/core/units.js';
 import { joinCountries, valueForYear, latestWellCoveredYear } from '../src/core/join.js';
+import { gaussLegendre, SphericalHarmonics, EARTH_RADIUS as RADIUS, OMEGA } from '../src/core/spectral.js';
+import { BarotropicModel, GRAVITY } from '../src/core/barotropic.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../../../..');
@@ -249,6 +251,99 @@ const random = seeded(20261022);
   check('units: 1e-3 kg m-2 s-1 is 3.6 mm/h', toShown(1e-3, displayUnit('kg m-2 s-1')) - 3.6, 1e-12);
   check('units: 10 m/s in knots', toShown(10, displayUnit('m s-1', 'kn')) - 19.4384, 1e-4);
   assert('units: numbers for reading', format(124516650) === '125 M' && format(3.14159) === '3.14' && format(1013.2) === '1013');
+}
+
+// ---- spherical harmonics and the barotropic model -------------------------------------
+{
+  const { mu, w } = gaussLegendre(64);
+  check('spectral: Gauss-Legendre weights sum to 2', w.reduce((s, x) => s + x, 0) - 2, 1e-13);
+  check('spectral: quadrature of mu^2 is 2/3', w.reduce((s, x, i) => s + x * mu[i] ** 2, 0) - 2 / 3, 1e-13);
+  const sh = new SphericalHarmonics(42);
+  let worst = 0;
+  for (let k = 0; k < sh.size; k++) {
+    let s = 0;
+    for (let j = 0; j < sh.nlat; j++) s += sh.w[j] * sh.P[j * sh.size + k] ** 2;
+    worst = Math.max(worst, Math.abs(s - 1));
+  }
+  check('spectral: associated Legendre functions are normalised (T42)', worst, 1e-12);
+  const rnd = seeded(42);
+  const r = sh.zeros();
+  for (let k = 0; k < sh.size; k++) { r.re[k] = rnd() - 0.5; r.im[k] = sh.m[k] === 0 ? 0 : rnd() - 0.5; }
+  const back = sh.analyse(sh.synthesise(r));
+  let rt = 0;
+  for (let k = 0; k < sh.size; k++) rt = Math.max(rt, Math.abs(back.re[k] - r.re[k]), Math.abs(back.im[k] - r.im[k]));
+  check('spectral: synthesis then analysis returns the coefficients', rt, 1e-12);
+  // Solid-body rotation u = u0 cos(phi): psi = -a u0 mu, vorticity 2 u0 mu / a.
+  const u0 = 20, psi = sh.zeros();
+  psi.re[sh.index(0, 1)] = (-RADIUS * u0) / Math.sqrt(1.5);
+  const { U, V } = sh.windFromStreamFunction(psi);
+  let eu = 0, ev = 0;
+  for (let j = 0; j < sh.nlat; j++) for (let k = 0; k < sh.nlon; k++) {
+    eu = Math.max(eu, Math.abs(U[j * sh.nlon + k] - u0 * (1 - sh.mu[j] ** 2)));
+    ev = Math.max(ev, Math.abs(V[j * sh.nlon + k]));
+  }
+  check('spectral: wind of a solid-body rotation', Math.max(eu, ev), 1e-12, 'm/s');
+  const zg = sh.synthesise(sh.curl(U, V));
+  let ez = 0;
+  for (let j = 0; j < sh.nlat; j++) ez = Math.max(ez, Math.abs(zg[j * sh.nlon] - (2 * u0 * sh.mu[j]) / RADIUS));
+  check('spectral: curl of that wind is 2 u0 sin(phi) / a', ez / ((2 * u0) / RADIUS), 1e-12);
+  // The curl of the wind of a random stream function is its Laplacian; its divergence is zero.
+  const ps = sh.zeros();
+  for (let k = 0; k < sh.size; k++) if (sh.n[k] > 0 && sh.n[k] < 30) { ps.re[k] = 1e7 * (rnd() - 0.5); ps.im[k] = sh.m[k] === 0 ? 0 : 1e7 * (rnd() - 0.5); }
+  const wind = sh.windFromStreamFunction(ps);
+  const curl = sh.curl(wind.U, wind.V), div = sh.divergence(wind.U, wind.V);
+  const lap = sh.scale({ re: Float64Array.from(ps.re), im: Float64Array.from(ps.im) }, (n) => sh.laplacianEigen(n));
+  let ec = 0, ed = 0, scale = 0;
+  for (let k = 0; k < sh.size; k++) {
+    ec = Math.max(ec, Math.hypot(curl.re[k] - lap.re[k], curl.im[k] - lap.im[k]));
+    ed = Math.max(ed, Math.hypot(div.re[k], div.im[k]));
+    scale = Math.max(scale, Math.hypot(lap.re[k], lap.im[k]));
+  }
+  check('spectral: curl of the wind of psi is the Laplacian of psi', ec / scale, 1e-10);
+  check('spectral: the wind of psi has no divergence', ed / scale, 1e-10);
+
+  // The Rossby-Haurwitz wave of wavenumber 4 (Williamson et al. 1992, test 6) is an
+  // exact solution of the barotropic vorticity equation, travelling east at
+  // nu = (R (3 + R) omega - 2 Omega) / ((1 + R)(2 + R)) (Haurwitz 1940).
+  const R = 4, om = 7.848e-6, K = 7.848e-6;
+  const nu = (R * (3 + R) * om - 2 * OMEGA) / ((1 + R) * (2 + R));
+  const rh = (t) => {
+    const g = new Float64Array(sh.nlat * sh.nlon);
+    for (let j = 0; j < sh.nlat; j++) for (let k = 0; k < sh.nlon; k++) {
+      const m = sh.mu[j], lam = (2 * Math.PI * k) / sh.nlon - nu * t;
+      g[j * sh.nlon + k] = -RADIUS * RADIUS * om * m + RADIUS * RADIUS * K * (1 - m * m) ** 2 * m * Math.cos(R * lam);
+    }
+    return sh.analyse(g);
+  };
+  const model = new BarotropicModel({ truncation: 42, dampingHours: 0 });
+  model.setStreamFunction(rh(0));
+  for (let t = 0; t < 86400; t += 1800) model.step(1800);
+  const exact = sh.scale(rh(86400), (n) => sh.laplacianEigen(n));
+  let err = 0, mx = 0;
+  for (let k = 0; k < sh.size; k++) {
+    err = Math.max(err, Math.hypot(model.zeta.re[k] - exact.re[k], model.zeta.im[k] - exact.im[k]));
+    mx = Math.max(mx, Math.hypot(exact.re[k], exact.im[k]));
+  }
+  check('barotropic: Rossby-Haurwitz wave after one day (relative error)', err / mx, 1e-6);
+  const k54 = sh.index(4, 5);
+  const phase = Math.atan2(model.zeta.im[k54], model.zeta.re[k54]) - Math.atan2(exact.im[k54], exact.re[k54]);
+  check('barotropic: its phase speed, 12.2 degrees a day', Math.atan2(Math.sin(phase), Math.cos(phase)), 1e-6, 'rad');
+  // A random flow: energy and enstrophy are kept (the spectral method keeps both
+  // exactly; Runge-Kutta loses a little at the smallest scales).
+  const m2 = new BarotropicModel({ truncation: 42, dampingHours: 0 });
+  const z = sh.zeros();
+  for (let k = 0; k < sh.size; k++) if (sh.n[k] > 0 && sh.n[k] <= 15) { z.re[k] = 1e-5 * (rnd() - 0.5); z.im[k] = sh.m[k] === 0 ? 0 : 1e-5 * (rnd() - 0.5); }
+  m2.zeta = z;
+  const i0 = m2.invariants();
+  for (let t = 0; t < 86400; t += 1800) m2.step(1800);
+  const i1 = m2.invariants();
+  check('barotropic: energy kept over a day', (i1.energy - i0.energy) / i0.energy, 1e-4);
+  check('barotropic: enstrophy kept over a day', (i1.enstrophy - i0.enstrophy) / i0.enstrophy, 2e-3);
+  // Linear balance of a zonal flow u0 cos(phi): z = -(Omega a u0 / g) (mu^2 - 1/3).
+  const zb = sh.synthesise(model.balancedHeight(psi));
+  let eb = 0;
+  for (let j = 0; j < sh.nlat; j++) eb = Math.max(eb, Math.abs(zb[j * sh.nlon] + ((OMEGA * RADIUS * u0) / GRAVITY) * (sh.mu[j] ** 2 - 1 / 3)));
+  check('barotropic: balanced height of a zonal flow', eb, 1e-6, 'm');
 }
 
 // ---- joins on the real products ------------------------------------------------

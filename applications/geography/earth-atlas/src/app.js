@@ -9,12 +9,15 @@
 import { Stage } from './render/stage.js';
 import { Labels } from './render/labels.js';
 import { Library } from './data/products.js';
-import { buildCatalogue, DOMAINS, INDICATORS } from './layers/catalogue.js';
+import { buildCatalogue, DOMAINS, INDICATORS, modelRank } from './layers/catalogue.js';
 import { BaseLayer } from './layers/base.js';
 import { SurfaceLayer } from './layers/surface.js';
 import { FlowLayer } from './layers/flow.js';
 import { LinesLayer } from './layers/lines.js';
 import { EventsLayer } from './layers/events.js';
+import { ImageryLayer, DetailLayer } from './layers/imagery.js';
+import { LabModel, modelInputs, LAB_MODEL } from './layers/labmodel.js';
+import { setClouds } from './render/surface.js';
 import { Timeline, formatUTC, formatShortUTC, formatDay, formatOffset } from './ui/timeline.js';
 import { renderLegend } from './ui/legend.js';
 import { renderPlace } from './ui/place.js';
@@ -32,14 +35,18 @@ const HOUR = 3600000, DAY = 86400000;
 
 const state = {
   projection: 'globe',
-  surface: null, flow: null, lines: 'none', events: null, indicator: null,
-  style: 'relief', night: true, coast: true, borders: true, rivers: true, graticule: false, labels: true, reliefOnData: true,
+  surface: null, compare: null, flow: null, lines: 'none', events: null, indicator: null,
+  style: 'relief', night: true, lights: true, clouds: false,
+  coast: true, borders: true, rivers: true, graticule: false, labels: true, reliefOnData: true,
   lang: 'en',
   time: Date.now(), live: true, playing: false,
   pinned: null,
 };
 
 let library, catalogue, stage, base, surface, flow, lines, events, labels, timeline, geography, elevation;
+let imagery, detail, labModel;
+const lab = { input: null, running: false, progress: 0, verification: null, against: '', error: '' };
+const MODEL_COLOURS = ['#CA8DBE', '#f6c47e', '#9fb6e8', '#8fd1b4', '#e8a0a0'];
 const loaded = new Map();          // field products in memory, by name
 const indicators = new Map();      // indicator products, by name, with their joins
 let hover = null;
@@ -91,7 +98,13 @@ async function start() {
     loaded.set(relief[0], elevation);
   }
   await new Promise((r) => setTimeout(r, 0));
-  base.paint(elevation, state.style);
+  base.painted = state.style === 'plain' ? 'plain' : 'relief';
+  base.paint(elevation, base.painted);
+  imagery = new ImageryLayer(stage, library);
+  detail = new DetailLayer(stage);
+  labModel = new LabModel(library);
+  const inputs = modelInputs(library);
+  if (inputs) lab.input = `${inputs.model} at the start`;
 
   surface = new SurfaceLayer(stage, library, geography.meta.layers.countries);
   flow = new FlowLayer(stage, library);
@@ -109,13 +122,16 @@ async function start() {
   timeline = new Timeline($('timeline'), (t) => { state.live = false; state.playing = false; setTime(t); updatePlay(); remember(); });
   bind();
   updateTimeline();
-  applyBase();
+  applyBase('style');
+  applyBase('lights');
+  if (state.clouds) applyBase('clouds');
   setProjection(state.projection, true);
   setTime(state.live ? Date.now() : state.time);
   renderPanel();
   $('loading').hidden = true;
   // For inspection from the browser's console and for automated checks.
-  window.atlas = { state, stage, base, surface, flow, lines, events, library, catalogue, labels };
+  window.atlas = { state, stage, base, surface, flow, lines, events, library, catalogue: () => catalogue, labels, imagery, detail, lab, runLab,
+    select: { surface: (id) => selectSurface(id), compare: (id) => selectCompare(id), flow: (id) => selectFlow(id), lines: (id) => selectLines(id) } };
   requestAnimationFrame(loop);
 
   // The rest of the data, for the place card.
@@ -144,10 +160,11 @@ function loadIndicator(name) {
 function chooseDefaults() {
   const ids = (list) => list.map((x) => x.id);
   if (!state.surface || (state.surface !== 'none' && !ids(catalogue.surfaces).includes(state.surface))) {
-    state.surface = (catalogue.surfaces.find((s) => /^wind@.*:speed$/.test(s.id)) || catalogue.surfaces[0] || { id: 'none' }).id;
+    state.surface = (catalogue.surfaces.find((s) => s.key === 'speed:wind|10 m') || catalogue.surfaces[0] || { id: 'none' }).id;
   }
+  if (state.compare && !ids(catalogue.surfaces).includes(state.compare)) state.compare = null;
   if (!state.flow || (state.flow !== 'none' && !ids(catalogue.flows).includes(state.flow))) {
-    state.flow = (catalogue.flows.find((f) => /^wind@/.test(f.id)) || { id: 'none' }).id;
+    state.flow = (catalogue.flows.find((f) => f.key === 'wind|10 m') || { id: 'none' }).id;
   }
   if (state.lines !== 'none' && !ids(catalogue.lines).includes(state.lines)) state.lines = 'none';
   if (state.events && !ids(catalogue.events).includes(state.events)) state.events = null;
@@ -164,10 +181,17 @@ async function selectSurface(id, render = true) {
   const def = find(catalogue.surfaces, id);
   if (def && def.kind === 'indicator') state.indicator = id;
   if (def && def.kind === 'field') track(def.product);
-  await surface.select(def);
+  let compare = find(catalogue.surfaces, state.compare);
+  if (compare && (!def || compare.key !== def.key || compare.id === def.id)) { state.compare = null; compare = null; }
+  await surface.select(def, compare, state.time);
   if (def && def.kind === 'indicator') loadIndicator(def.product);
   surface.update(state.time);
   afterChange(render);
+}
+
+async function selectCompare(id) {
+  state.compare = id;
+  await selectSurface(state.surface);
 }
 
 async function selectFlow(id, render = true) {
@@ -202,8 +226,16 @@ function afterChange(render) {
 function renderPanel() {
   const def = find(catalogue.surfaces, state.surface);
   const years = def && def.kind === 'indicator' && surface.year ? { year: surface.year } : null;
-  buildPanel($('layers'), catalogue, state, years, {
+  const extra = {
+    imagery: imagery ? imagery.dayImagery() : [],
+    lights: Boolean(imagery && imagery.entry('night-lights')),
+    clouds: catalogue.clouds.length > 0,
+    lab: lab.input ? lab : null,
+  };
+  buildPanel($('layers'), catalogue, state, years, extra, {
     surface: (id) => selectSurface(id),
+    compare: (id) => selectCompare(id),
+    runLab: () => runLab(),
     flow: (id) => selectFlow(id),
     lines: (id) => selectLines(id),
     events: (id) => selectEvents(id),
@@ -223,7 +255,24 @@ function applyBase(key) {
   const u = stage.material.uniforms;
   u.uNight.value = state.night ? 1 : 0;
   u.uReliefOnData.value = state.reliefOnData ? 0.55 : 0;
-  if (key === 'style') base.paint(elevation, state.style);
+  if (key === 'style') {
+    const imageryStyle = state.style !== 'relief' && state.style !== 'plain';
+    if (!imageryStyle || base.painted !== 'relief') {
+      const want = state.style === 'plain' ? 'plain' : 'relief';
+      if (base.painted !== want) { base.paint(elevation, want); base.painted = want; }
+    }
+    imagery.setStyle(state.style).then(() => {
+      if (imagery.active) detail.request(imagery.active); else detail.clear();
+      dirty.legend = true;
+    });
+  }
+  if (key === 'lights') imagery.setLights(state.lights);
+  if (key === 'clouds') {
+    const c = catalogue.clouds[0];
+    if (state.clouds && c) track(c.product).then(() => setTime(state.time));
+    else u.uCloudOn.value = 0;
+    dirty.legend = true;
+  }
   base.show(state);
   $('labels').hidden = !state.labels;
   dirty.labels = true;
@@ -273,6 +322,10 @@ let stepTimes = [];
 function setTime(t) {
   state.time = t;
   surface.update(t);
+  if (state.clouds && catalogue.clouds.length) {
+    const c = catalogue.clouds[0], p = loaded.get(c.product);
+    if (p) setClouds(stage.material, surface.textures, p, c.variable, p.bracket(t, c.variable), true);
+  }
   flow.update(t);
   lines.update(t);
   events.update(t);
@@ -484,19 +537,39 @@ function placeCard() {
     sections.get(key).push([term, html]);
   };
   const series = [];
+  // Probes of the same quantity from several models are shown together.
+  const groups = new Map();
   for (const probe of catalogue.probes) {
-    const p = loaded.get(probe.product);
-    if (!p) continue;
-    if (probe.id === 'elevation') {
-      const z = p.sample(probe.variables[0], t, lon, lat);
-      if (Number.isFinite(z)) add('geography', z >= 0 ? 'Elevation' : 'Depth', `${format(Math.abs(z))} m`);
-      continue;
+    const k = probe.key || `${probe.product}/${probe.variables.join('/')}`;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(probe);
+  }
+  const models = new Set();
+  for (const list of groups.values()) {
+    list.sort((a, b) => modelRank(a.model) - modelRank(b.model));
+    const rows = [];
+    for (const probe of list) {
+      const p = loaded.get(probe.product);
+      if (!p) continue;
+      if (probe.id === 'elevation') {
+        const z = p.sample(probe.variables[0], t, lon, lat);
+        if (Number.isFinite(z)) add('geography', z >= 0 ? 'Elevation' : 'Depth', `${format(Math.abs(z))} m`);
+        continue;
+      }
+      const r = valueAt(probe, p, lon, lat, t);
+      const text = formatProbe(probe, r);
+      if (text) rows.push({ probe, p, r, text });
     }
-    const r = valueAt(probe, p, lon, lat, t);
-    const text = formatProbe(probe, r);
-    if (!text) continue;
-    add(probe.domain, probe.label, text + timeNote(p, t));
-    if (p.times.length > 1 && probe.kind !== 'direction') {
+    if (!rows.length) continue;
+    const [main, ...others] = rows;
+    const more = others.length && list.length > 1
+      ? `<br><span class="dir">${others.map((o) => `${esc(o.probe.model)} ${o.text.replace(/ <span.*$/, '')}`).join(' · ')}</span>` : '';
+    const label = list.length > 1 && rows.length > 1 ? `${main.probe.label}, ${main.probe.model}` : main.probe.label;
+    add(main.probe.domain, label, main.text + timeNote(main.p, t) + more);
+    const lines = [];
+    for (const row of rows) {
+      const { probe, p, r } = row;
+      if (p.times.length < 2 || probe.kind === 'direction') continue;
       const unit = displayUnit(probe.units);
       let values = p.series(probe.variables[0], lon, lat);
       if (probe.kind === 'vector') {
@@ -505,9 +578,15 @@ function placeCard() {
       }
       const shown = values.map((v) => (probe.percent ? v * 100 : toShown(v, unit)));
       const cursor = { time: t, value: probe.kind === 'vector' ? toShown(r.speed, unit) : probe.percent ? r.value * 100 : toShown(r.value, unit) };
-      series.push({ label: probe.kind === 'vector' ? `${probe.label} speed` : probe.label, now: text.replace(/ <span.*$/, ''), times: p.times, values: shown, cursor });
+      models.add(probe.model);
+      lines.push({ times: p.times, values: shown, cursor, model: probe.model });
+    }
+    if (lines.length) {
+      series.push({ label: main.probe.kind === 'vector' ? `${main.probe.label} speed` : main.probe.label, now: main.text.replace(/ <span.*$/, ''), lines });
     }
   }
+  const palette = [...models].sort((a, b) => modelRank(a) - modelRank(b));
+  for (const s2 of series) for (const l of s2.lines) l.colour = MODEL_COLOURS[palette.indexOf(l.model) % MODEL_COLOURS.length];
   const order = ['meteorology', 'oceanography', 'climate', 'geography', 'geophysics'].map((d) => DOMAINS[d]);
   const ordered = [...sections].sort((a, b) => (order.indexOf(a[0]) + 1 || 99) - (order.indexOf(b[0]) + 1 || 99));
   if (where.kind === 'country') {
@@ -533,6 +612,7 @@ function placeCard() {
     rows,
     sections: ordered.map(([heading, r]) => ({ heading, rows: r })),
     series,
+    models: palette.length > 1 ? palette.map((m, i) => ({ model: m, colour: MODEL_COLOURS[i % MODEL_COLOURS.length] })) : null,
   };
 }
 
@@ -545,7 +625,7 @@ function legendData() {
     const def = surface.def;
     if (def.kind === 'field') {
       const p = surface.product, b = surface.shown || p.bracket(state.time);
-      const credit = (p.meta.source && p.meta.source.credit) || '';
+      const credit = [p.meta.source && p.meta.source.credit, surface.compare && surface.compare.product.meta.source.credit].filter(Boolean).join(' · ');
       const when = p.times.length ? (b.offset ? formatShortUTC(b.shown) : 'interpolated in time') : '';
       lg.note = [credit, p.times.length === 1 ? `daily mean, ${formatDay(p.times[0])}` : when].filter(Boolean).join(' · ');
       if (b.offset && Math.abs(b.offset) > HOUR) lg.offset = `Data from ${formatOffset(b.offset)}`;
@@ -580,9 +660,12 @@ function legendData() {
 function updateCredits() {
   const credits = new Set(['Natural Earth']);
   if (elevation && elevation.meta.source.credit) credits.add(elevation.meta.source.credit);
-  for (const p of [surface.def && surface.def.kind === 'field' && surface.product, flow.product, lines.product]) {
+  for (const p of [surface.def && surface.def.kind === 'field' && surface.product, surface.compare && surface.compare.product, flow.product, lines.product]) {
     if (p && p.meta && p.meta.source.credit) credits.add(p.meta.source.credit);
   }
+  if (imagery && imagery.active) credits.add(`${imagery.active.source.credit}${imagery.active.date ? ` (${imagery.active.date})` : ''}`);
+  if (state.lights && imagery && imagery.entry('night-lights')) credits.add('NASA Black Marble');
+  if (state.clouds && catalogue.clouds.length) credits.add(`clouds: ${catalogue.clouds[0].model}`);
   if (surface.def && surface.def.kind === 'indicator' && surface.product) credits.add(surface.product.source.credit);
   if (events.product) credits.add(events.product.source.credit);
   $('credits').textContent = [...credits].filter(Boolean).join(' · ');
@@ -614,8 +697,56 @@ function renderAbout() {
   const ind = library.list('indicators');
   if (ind.length) add(`Indicators by country (${ind.length})`, { ...ind[0].source, licence: 'CC BY 4.0' });
   for (const e of library.list('events')) add(e.title, e.source);
+  for (const e of library.list('imagery')) add(e.title, { ...e.source, provider: `${e.layer}${e.date ? `, ${e.date}` : ''}` });
+  if (lab.input) rows.push(`<dt>Laboratory model</dt><dd>The barotropic vorticity equation at 500 hPa, as in the first numerical forecast (Charney, Fjørtoft and von Neumann 1950), solved by the spectral transform method at triangular truncation T42 (a Gaussian grid of 128 × 64) with fourth-order Runge–Kutta steps of 30 min. It starts from the 500 hPa wind of the GFS; heights follow from the stream function by linear balance and are added, as changes, to the analysed height. Tested against the Rossby–Haurwitz wave, an exact solution.</dd>`);
   rows.push(`<dt>Method</dt><dd>Fields are interpolated bilinearly in space and linearly in time between the stored steps; a place near missing values takes the mean of the valid neighbours carrying at least half the weight. Wind direction is the direction it comes from. Wave energy travels at the deep-water group speed g T / 4π along the peak direction. The Sun's position follows the Astronomical Almanac's low-precision formulas (0.01°); day, civil, nautical and astronomical twilight are drawn as bands. Countries are joined to indicators by their World Bank and ISO codes; boundaries are Natural Earth's de facto depiction. The Equal Earth projection keeps areas true.</dd>`);
   $('about-body').innerHTML = `<dl>${rows.join('')}</dl>`;
+}
+
+// ---- the laboratory's model ---------------------------------------------------------
+
+let labPanelTimer = 0;
+async function runLab() {
+  if (lab.running) return;
+  lab.running = true; lab.progress = 0; lab.error = '';
+  renderPanel();
+  try {
+    const result = await labModel.run(state.time, {
+      onProgress: (f) => {
+        lab.progress = f;
+        clearTimeout(labPanelTimer);
+        labPanelTimer = setTimeout(renderPanel, 60);
+      },
+    });
+    const meta = result.product.meta;
+    library.fieldMeta.set(meta.name, meta);
+    library.fields.set(meta.name, Promise.resolve(result.product));
+    loaded.set(meta.name, result.product);
+    surface.textures.forget(meta.name);
+    catalogue = buildCatalogue(library);
+    lab.verification = result.verification;
+    lab.against = result.against;
+    state.live = false;
+    state.time = result.start;
+    const height = catalogue.surfaces.find((d) => d.key === 'height|500 hPa|' && d.model === LAB_MODEL);
+    const contours = catalogue.lines.find((d) => d.key === 'heights|500 hPa' && d.model === LAB_MODEL);
+    const wind = catalogue.flows.find((d) => d.key === 'wind|500 hPa' && d.model === LAB_MODEL);
+    lab.running = false;
+    await Promise.all([
+      height ? selectSurface(height.id, false) : null,
+      contours ? selectLines(contours.id, false) : null,
+      wind ? selectFlow(wind.id, false) : null,
+    ]);
+    setTime(state.time);
+    updatePlay();
+  } catch (e) {
+    console.error(e);
+    lab.error = `The model could not run: ${e.message}`;
+  }
+  lab.running = false;
+  renderPanel();
+  updateTimeline();
+  remember();
 }
 
 // ---- the URL remembers the view ------------------------------------------------------
@@ -628,6 +759,9 @@ function remember() {
     q.set('p', state.projection);
     q.set('c', `${v.lon.toFixed(1)},${v.lat.toFixed(1)},${v.dist.toFixed(2)}`);
     q.set('s', state.surface || 'none'); q.set('f', state.flow || 'none'); q.set('l', state.lines || 'none');
+    if (state.compare) q.set('m', state.compare);
+    if (!state.lights) q.set('nl', '0');
+    if (state.clouds) q.set('cl', '1');
     if (state.events) q.set('e', state.events);
     if (!state.live) q.set('t', new Date(state.time).toISOString().slice(0, 16) + 'Z');
     if (state.pinned) q.set('at', `${state.pinned[0].toFixed(3)},${state.pinned[1].toFixed(3)}`);
@@ -647,7 +781,9 @@ function restore() {
       stage.updateCamera();
     }
   }
-  for (const [k, key] of [['s', 'surface'], ['f', 'flow'], ['l', 'lines'], ['e', 'events']]) if (q.get(k)) state[key] = q.get(k);
+  for (const [k, key] of [['s', 'surface'], ['f', 'flow'], ['l', 'lines'], ['e', 'events'], ['m', 'compare']]) if (q.get(k)) state[key] = q.get(k);
+  if (q.get('nl') === '0') state.lights = false;
+  if (q.get('cl') === '1') state.clouds = true;
   if (q.get('t')) { const t = Date.parse(q.get('t')); if (Number.isFinite(t)) { state.time = t; state.live = false; } }
   if (q.get('at')) { const a = q.get('at').split(',').map(Number); if (a.every(Number.isFinite)) state.pinned = a; }
   if (q.get('lang')) state.lang = q.get('lang');
@@ -675,7 +811,12 @@ function loop(now) {
     flow.step();
   }
   // Names follow the camera, whatever moved it.
-  if (stage.revision !== lastRevision) { lastRevision = stage.revision; dirty.labels = true; }
+  if (stage.revision !== lastRevision) {
+    lastRevision = stage.revision;
+    dirty.labels = true;
+    if (imagery.active) detail.request(imagery.active);
+  }
+  detail.frame();
   if (dirty.labels) { dirty.labels = false; flow.viewChanged(); updateLabels(); }
   const res = stage.resolution;
   base.frame(res); flow.frame(res); lines.frame(res); events.frame(res);

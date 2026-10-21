@@ -6,21 +6,30 @@
 //   flow     a vector field shown by moving particles;
 //   lines    isolines of a field, with its highs and lows;
 //   events   things that happened at places and instants.
-// A field variable is recognised by its CF standard name, so that any product
-// carrying, say, sea_surface_temperature offers the same layer, drawn the same
-// way. A variable that is not recognised is still offered, with a range taken
-// from its own values: new data, such as our own model output, can be seen as
-// soon as it is a product.
+// A field variable is recognised by its CF standard name and its level, so
+// that any product carrying, say, geopotential height at 500 hPa offers the
+// same layer, drawn the same way. Products of different models for the same
+// quantity share one *key*: the panel offers them as a choice of model, and
+// two of them can be compared as a difference. A variable that is not
+// recognised is still offered, with a range taken from its own values: new
+// data, such as our own model output, can be seen as soon as it is a product.
 //
 // Styles (colour map, range, scale) live here, in the application, and not in
-// the data. Ranges are in the units shown (src/core/units.js).
+// the data. Ranges are in the units shown (src/core/units.js); `ranges` gives
+// a range per level where the quantity's values depend on the level.
 
 const QUANTITIES = [
-  { id: 'air-temperature', standard: 'air_temperature', label: 'Air temperature', colormap: 'thermal', range: [-35, 40] },
+  { id: 'air-temperature', standard: 'air_temperature', label: 'Air temperature', colormap: 'thermal', range: [-35, 40], ranges: { '850 hPa': [-35, 30], '500 hPa': [-50, 0] } },
   { id: 'surface-temperature', standard: 'surface_temperature', label: 'Surface temperature', colormap: 'thermal', range: [-40, 50] },
   { id: 'pressure', standard: 'air_pressure_at_sea_level', label: 'Pressure at sea level', colormap: 'dense', reverse: true, range: [975, 1040] },
+  { id: 'height', standard: 'geopotential_height', label: 'Geopotential height', colormap: 'haline', range: [4900, 5950], ranges: { '850 hPa': [1150, 1600], '500 hPa': [4900, 5950], '250 hPa': [9600, 11000] } },
   { id: 'precipitation', standard: 'precipitation_flux', label: 'Precipitation', colormap: 'haline', range: [0.1, 20], scale: 'log', fade: 0.2 },
   { id: 'humidity', standard: 'relative_humidity', label: 'Relative humidity', colormap: 'tempo', reverse: true, range: [0, 100] },
+  { id: 'cloud', standard: 'cloud_area_fraction', label: 'Cloud cover', colormap: 'ice', range: [0, 100], fade: 0.12 },
+  { id: 'water-vapour', standard: 'atmosphere_mass_content_of_water_vapor', label: 'Precipitable water', colormap: 'rain', reverse: true, range: [0, 70] },
+  { id: 'cape', standard: 'atmosphere_convective_available_potential_energy_wrt_surface', label: 'Convective energy (CAPE)', colormap: 'thermal', range: [0, 3500], scale: 'sqrt', fade: 0.12 },
+  { id: 'vorticity', standard: 'atmosphere_absolute_vorticity', label: 'Absolute vorticity', colormap: 'balance', range: [-30, 30] },
+  { id: 'relative-vorticity', standard: 'atmosphere_relative_vorticity', label: 'Relative vorticity', colormap: 'balance', range: [-20, 20] },
   { id: 'shortwave-down', standard: 'surface_downwelling_shortwave_flux', label: 'Sunlight reaching the surface', colormap: 'thermal', range: [0, 1000] },
   { id: 'shortwave-up', standard: 'surface_upwelling_shortwave_flux', label: 'Sunlight reflected by the surface', colormap: 'thermal', range: [0, 500] },
   { id: 'longwave-down', standard: 'surface_downwelling_longwave_flux', label: 'Infrared from the sky', colormap: 'thermal', range: [100, 450] },
@@ -38,7 +47,7 @@ const QUANTITIES = [
 ];
 
 const VECTORS = [
-  { id: 'wind', standard: 'wind', label: 'Wind', colormap: 'orchid', range: [0, 25] },
+  { id: 'wind', standard: 'wind', label: 'Wind', colormap: 'orchid', range: [0, 25], ranges: { '850 hPa': [0, 35], '500 hPa': [0, 50], '250 hPa': [0, 80] } },
   { id: 'current', standard: 'sea_water_velocity', label: 'Ocean current', colormap: 'orchid', range: [0, 1.5] },
 ];
 
@@ -62,75 +71,118 @@ export const DOMAINS = {
   geography: 'Geography', geophysics: 'Geophysics',
 };
 
-const isDirection = (v) => /direction/.test(v.standard_name || '') || v.units === 'degree';
+// Models in the order they are offered.
+const MODEL_ORDER = ['GFS', 'AIGFS', 'AIGEFS mean', 'Barotropic (laboratory)'];
+export const modelRank = (m) => { const i = MODEL_ORDER.indexOf(m); return i < 0 ? MODEL_ORDER.length : i; };
 
-// "air temperature at 2m" -> " at 2 m"
+const isDirection = (v) => /direction/.test(v.standard_name || '') || v.units === 'degree';
+const isSpread = (v) => /realization:\s*standard_deviation/.test(v.cell_methods || '');
+const isMean = (v) => /realization:\s*mean/.test(v.cell_methods || '');
+
+// "air temperature at 2m" -> " at 2 m"; a stated level takes precedence.
 function height(v) {
+  if (v.level) return ` at ${v.level}`;
   const m = /\bat\s*(\d+(?:\.\d+)?)\s*m\b/i.exec(v.long_name || '');
   return m ? ` at ${m[1]} m` : '';
 }
 
+const levelOf = (v) => v.level || height(v).replace(/^ at /, '');
+const slug = (s) => (s ? `.${s.replace(/\s+/g, '')}` : '');
 const capital = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
 function source(meta) {
   const s = meta.source || {};
-  return { dataset: s.dataset, profile: s.profile, provider: s.provider, licence: s.licence, citation: s.citation, retrieved: s.retrieved_at };
+  return { dataset: s.dataset, profile: s.profile, provider: s.provider, licence: s.licence, citation: s.citation, retrieved: s.retrieved_at, credit: s.credit };
 }
 
 export function buildCatalogue(library) {
-  const surfaces = [], flows = [], lines = [], events = [], probes = [];
-  const taken = new Set();
+  const surfaces = [], flows = [], lines = [], events = [], probes = [], clouds = [];
   for (const [name, meta] of library.fieldMeta) {
     const domain = meta.domain || 'geography';
+    const model = meta.model || meta.title;
+    const taken = new Set();
     for (const vec of meta.vectors || []) {
       const known = VECTORS.find((k) => k.standard === vec.standard_name) || { id: vec.name, label: capital(vec.name.replace(/_/g, ' ')), colormap: 'orchid', range: [0, 20] };
       const u = meta.variables.find((v) => v.name === vec.u);
-      const id = `${known.id}@${name}`;
+      if (isSpread(u)) continue;
+      const level = levelOf(u);
+      const id = `${known.id}${slug(level)}@${name}`;
       const label = `${known.label}${height(u)}`;
-      flows.push({ id, kind: 'vector', label, product: name, variables: [vec.u, vec.v], domain, units: u.units, source: source(meta) });
-      surfaces.push({ id: `${id}:speed`, kind: 'field', label: `${known.label} speed${height(u)}`, product: name, variables: [vec.u, vec.v], domain, units: u.units,
-        style: { colormap: known.colormap, range: known.range, scale: 'linear' }, source: source(meta) });
-      taken.add(`${name}/${vec.u}`); taken.add(`${name}/${vec.v}`);
-      probes.push({ kind: 'vector', label: `${known.label}${height(u)}`, product: name, variables: [vec.u, vec.v], units: u.units, domain });
+      const range = (known.ranges && known.ranges[level]) || known.range;
+      flows.push({ id, key: `${known.id}|${level}`, kind: 'vector', label, model, product: name, variables: [vec.u, vec.v], domain, units: u.units, source: source(meta) });
+      surfaces.push({ id: `${id}:speed`, key: `speed:${known.id}|${level}`, kind: 'field', label: `${known.label} speed${height(u)}`, model, product: name, variables: [vec.u, vec.v], domain, units: u.units, level,
+        style: { colormap: known.colormap, range, scale: 'linear' }, source: source(meta) });
+      taken.add(vec.u); taken.add(vec.v);
+      probes.push({ kind: 'vector', label: `${known.label}${height(u)}`, model, product: name, variables: [vec.u, vec.v], units: u.units, domain, key: `${known.id}|${level}` });
     }
     const dir = meta.variables.find((v) => v.standard_name === 'sea_surface_wave_from_direction_at_variance_spectral_density_maximum');
     const per = meta.variables.find((v) => v.standard_name === 'sea_surface_wave_period_at_variance_spectral_density_maximum');
     if (dir && per) {
-      flows.push({ id: `waves@${name}`, kind: 'waves', label: 'Wave energy', product: name, variables: [dir.name, per.name], domain, units: 'm s-1', source: source(meta) });
+      flows.push({ id: `waves@${name}`, key: 'waves|', kind: 'waves', label: 'Wave energy', model, product: name, variables: [dir.name, per.name], domain, units: 'm s-1', source: source(meta) });
     }
     for (const v of meta.variables) {
-      if (taken.has(`${name}/${v.name}`)) continue;
+      if (taken.has(v.name)) continue;
       const known = QUANTITIES.find((q) => (q.standard && q.standard === v.standard_name) || (q.match && q.match(v)));
+      const level = levelOf(v);
       if (isDirection(v)) {
-        probes.push({ kind: 'direction', label: capital((v.long_name || v.name)), product: name, variables: [v.name], units: v.units, domain });
+        probes.push({ kind: 'direction', label: capital(v.long_name || v.name), model, product: name, variables: [v.name], units: v.units, domain });
         continue;
       }
-      const label = known ? `${known.label}${height(v)}` : capital(v.long_name || v.name);
-      probes.push({ kind: 'scalar', id: known && known.id, label, product: name, variables: [v.name], units: v.units, domain, percent: known && known.percent });
+      const spread = isSpread(v);
+      const qid = known ? known.id : v.name;
+      const label = known ? `${known.label}${height(v)}${spread ? ', ensemble spread' : ''}` : capital(v.long_name || v.name);
+      const shownModel = isMean(v) ? `${model} mean` : model;
+      probes.push({ kind: 'scalar', id: known && known.id, label, model: shownModel, product: name, variables: [v.name], units: v.units, domain, percent: known && known.percent, key: `${qid}|${level}|${spread ? 'spread' : ''}` });
       if (known && known.base) continue;
-      const style = known
-        ? { colormap: known.colormap, reverse: known.reverse, range: known.range, scale: known.scale || 'linear', fade: known.fade }
-        : { colormap: 'matter', reverse: true, clip: [0, 0.9], range: null, scale: 'linear', auto: [v.p02, v.p98] };
-      surfaces.push({ id: `${known ? known.id : v.name}@${name}`, kind: 'field', label, product: name, variables: [v.name], domain, units: v.units, style, source: source(meta), percent: known && known.percent });
+      if (v.standard_name === 'cloud_area_fraction' && !spread) clouds.push({ product: name, variable: v.name, model });
+      let style;
+      if (spread) {
+        style = { colormap: 'orchid', range: null, scale: 'linear', auto: [0, v.p98] };
+      } else if (known) {
+        style = { colormap: known.colormap, reverse: known.reverse, range: (known.ranges && known.ranges[level]) || known.range, scale: known.scale || 'linear', fade: known.fade };
+      } else {
+        style = { colormap: 'matter', reverse: true, clip: [0, 0.9], range: null, scale: 'linear', auto: [v.p02, v.p98] };
+      }
+      surfaces.push({ id: `${qid}${slug(level)}${spread ? '-spread' : ''}@${name}`, key: `${qid}|${level}|${spread ? 'spread' : ''}`, kind: 'field', label, model: shownModel, product: name, variables: [v.name], domain, units: v.units, level, style, source: source(meta), percent: known && known.percent });
+      if (spread) continue;
       if (v.standard_name === 'air_pressure_at_sea_level') {
-        lines.push({ id: `isobars@${name}`, label: 'Isobars', product: name, variable: v.name, step: 400, base: 101300, extrema: { radius: 10, prominence: 500, polarRows: 8 }, units: v.units, labelUnits: 'hPa' });
+        lines.push({ id: `isobars@${name}`, key: 'isobars|', label: 'Isobars', model: shownModel, product: name, variable: v.name, step: 400, base: 101300, extrema: { radius: 10, prominence: 500, polarRows: 8 }, units: v.units, labelUnits: 'hPa' });
       }
       if (v.standard_name === 'air_temperature') {
-        lines.push({ id: `isotherms@${name}`, label: 'Isotherms', product: name, variable: v.name, step: 5, base: 273.15, units: v.units, labelUnits: '°C' });
+        lines.push({ id: `isotherms${slug(level)}@${name}`, key: `isotherms|${level}`, label: `Isotherms${height(v)}`, model: shownModel, product: name, variable: v.name, step: 5, base: 273.15, units: v.units, labelUnits: '°C' });
+      }
+      if (v.standard_name === 'geopotential_height') {
+        const step = /250/.test(level) ? 120 : 60;
+        lines.push({ id: `heights${slug(level)}@${name}`, key: `heights|${level}`, label: `Height contours${height(v)}`, model: shownModel, product: name, variable: v.name, step, base: 0, extrema: { radius: 10, prominence: 40, polarRows: 8, minAbsLat: 22 }, units: v.units, labelUnits: 'm' });
       }
     }
   }
   for (const e of library.list('indicators')) {
     const [label, unit] = INDICATORS[e.code] || [e.quantity || e.title, e.unit];
-    surfaces.push({ id: `indicator:${e.name}`, kind: 'indicator', label, product: e.name, code: e.code, domain: e.domain || 'geography',
+    surfaces.push({ id: `indicator:${e.name}`, key: `indicator:${e.name}`, kind: 'indicator', label, product: e.name, code: e.code, domain: e.domain || 'geography',
       units: unit, title: e.title, style: { colormap: 'matter', reverse: true, clip: [0.04, 0.96] }, source: e.source });
   }
   for (const e of library.list('events')) {
     events.push({ id: e.name, label: e.title, kind: e.kind, product: e.name, count: e.count, window: e.window, domain: e.domain });
   }
   const order = ['meteorology', 'oceanography', 'climate', 'geography', 'geophysics'];
-  const within = (s) => (s.id.startsWith('wind@') ? 0 : QUANTITIES.findIndex((q) => s.id.startsWith(`${q.id}@`)) + 1 || 500);
-  const rank = (s) => (order.indexOf(s.domain) + 1 || 99) * 1000 + within(s);
-  surfaces.sort((a, b) => rank(a) - rank(b));
-  return { surfaces, flows, lines, events, probes };
+  const levelRank = (level) => { const m = /(\d+)\s*hPa/.exec(level || ''); return m ? 2000 - Number(m[1]) : 0; };
+  const within = (s) => (s.key.startsWith('speed:wind') ? 0 : QUANTITIES.findIndex((q) => s.key.startsWith(`${q.id}|`)) + 1 || 500);
+  const rank = (s) => (order.indexOf(s.domain) + 1 || 99) * 1e6 + within(s) * 1e4 + levelRank(s.level) + (s.key.endsWith('|spread') ? 5000 : 0);
+  surfaces.sort((a, b) => rank(a) - rank(b) || modelRank(a.model) - modelRank(b.model));
+  const flowRank = (f) => (f.key.startsWith('wind|') ? levelRank(f.key.split('|')[1]) : 5000);
+  flows.sort((a, b) => flowRank(a) - flowRank(b) || modelRank(a.model) - modelRank(b.model));
+  lines.sort((a, b) => a.key.localeCompare(b.key) || modelRank(a.model) - modelRank(b.model));
+  clouds.sort((a, b) => modelRank(a.model) - modelRank(b.model));
+  return { surfaces, flows, lines, events, probes, clouds };
+}
+
+// Definitions grouped by key, in catalogue order: [[key, [defs by model]]].
+export function byKey(defs) {
+  const groups = new Map();
+  for (const d of defs) {
+    if (!groups.has(d.key)) groups.set(d.key, []);
+    groups.get(d.key).push(d);
+  }
+  return [...groups];
 }

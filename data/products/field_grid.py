@@ -12,7 +12,11 @@ The grid is normalised so that every product reads the same way:
 - rows run from north to south, and columns eastward;
 - a grid that goes once round the Earth starts at the first longitude at or
   after -180 degrees, and its last column does not repeat its first;
-- dimensions of length one other than time (such as a depth of 0 m) are dropped.
+- dimensions of length one other than time (such as a depth of 0 m) are dropped;
+- a retrieval in several files (one per level, from an ncss dataset) becomes one
+  product: each variable takes its level into its name and description
+  (Temperature_isobaric@500hPa, "Temperature at 500 hPa"), and only the times
+  common to all files are kept.
 
 Values are stored as 16-bit integers, one linear scale per variable:
 value = q * scale + offset, with q = -32768 for no value. The scale is chosen
@@ -25,6 +29,7 @@ Usage::
 
     python data/products/field_grid.py --source gfs                  # default profile
     python data/products/field_grid.py --source oisst --profile month
+    python data/products/field_grid.py --source gfs-levels             # several files, one per level
     python data/products/field_grid.py --input run.nc --name my-run --title "..." --domain climate
 """
 
@@ -50,7 +55,8 @@ LAT_NAMES = {"latitude", "lat", "y", "nav_lat"}
 LON_NAMES = {"longitude", "lon", "x", "nav_lon"}
 UNIT_ALIASES = {"meters": "m", "meter": "m", "metres": "m", "second": "s", "seconds": "s", "sec": "s",
                 "degrees": "degree", "degrees_true": "degree", "deg": "degree", "Celsius": "degree_C",
-                "celsius": "degree_C", "degC": "degree_C", "kelvin": "K", "fraction": "1"}
+                "celsius": "degree_C", "degC": "degree_C", "kelvin": "K", "fraction": "1",
+                "m/s": "m s-1", "gpm": "m", "1/s": "s-1", "J/kg": "J kg-1", "kg.m-2": "kg m-2", "kg/m^2": "kg m-2"}
 VECTOR = re.compile(r"^(eastward|northward)_(.+)$")
 
 
@@ -92,89 +98,132 @@ def quantise(x: np.ndarray) -> tuple[np.ndarray, float, float]:
     return q.astype("<i2"), scale, offset
 
 
-def build(nc_path: Path, name: str, title: str, domain: str, source: dict, overrides: dict) -> dict:
-    ds = netcdf3.Dataset.open(nc_path)
-    lat_name = axis_name(ds, LAT_NAMES, "latitude")
-    lon_name = axis_name(ds, LON_NAMES, "longitude")
+class Grid:
+    """The horizontal grid of a file, normalised to rows north to south and, for
+    a grid round the Earth, columns from the first longitude at or after -180."""
+
+    def __init__(self, ds: netcdf3.Dataset):
+        self.lat_name = axis_name(ds, LAT_NAMES, "latitude")
+        self.lon_name = axis_name(ds, LON_NAMES, "longitude")
+        lats, lons = ds.array(self.lat_name), ds.array(self.lon_name)
+        dlat, dlon = regular(lats, "latitude"), regular(lons, "longitude")
+        self.flip = dlat > 0                              # stored south to north
+        nlon = len(lons)
+        tol = 1e-3 * abs(dlon)
+        self.periodic = abs(abs(dlon) * nlon - 360) < tol or abs(abs(dlon) * (nlon - 1) - 360) < tol
+        self.drop_last = self.periodic and abs(abs(dlon) * (nlon - 1) - 360) < tol
+        if self.drop_last:
+            lons, nlon = lons[:-1], nlon - 1
+        self.shift = 0
+        if self.periodic:
+            wrapped = (lons + 180) % 360 - 180
+            self.shift = int(np.argmin(wrapped))
+            lons = np.roll(wrapped, -self.shift)
+        lat0 = float(lats.max()) if self.flip else float(lats[0])
+        self.meta = {"lon0": round(float(lons[0]), 6), "dlon": round(abs(dlon), 9), "nlon": int(nlon),
+                     "lat0": round(lat0, 6), "dlat": round(abs(dlat), 9), "nlat": int(len(lats)),
+                     "periodic": bool(self.periodic), "crs": "WGS 84 geographic coordinates (EPSG:4326), degrees",
+                     "order": "rows north to south, columns eastward"}
+
+    def normalise(self, x: np.ndarray) -> np.ndarray:
+        if self.flip:
+            x = x[:, ::-1, :]
+        if self.drop_last:
+            x = x[:, :, :-1]
+        if self.shift:
+            x = np.roll(x, -self.shift, axis=2)
+        return x
+
+
+def read(path: Path, level: str | None, overrides: dict):
+    """The grid, times and variables of one file, as (Grid, [times], [(entry, values)])."""
+    ds = netcdf3.Dataset.open(path)
+    grid = Grid(ds)
     time_name = next((n for n, v in ds.variables.items() if len(v.dimensions) == 1
                       and (v.attributes.get("standard_name") == "time" or n == "time")), None)
-    lats, lons = ds.array(lat_name), ds.array(lon_name)
-    dlat, dlon = regular(lats, "latitude"), regular(lons, "longitude")
-    flip = dlat > 0                                   # stored south to north
-    nlon = len(lons)
-    periodic = abs(abs(dlon) * nlon - 360) < 1e-3 * abs(dlon) or abs(abs(dlon) * (nlon - 1) - 360) < 1e-3 * abs(dlon)
-    drop_last = periodic and abs(abs(dlon) * (nlon - 1) - 360) < 1e-3 * abs(dlon)
-    if drop_last:
-        lons, nlon = lons[:-1], nlon - 1
-    shift = 0
-    if periodic:
-        wrapped = (lons + 180) % 360 - 180
-        shift = int(np.argmin(wrapped))
-        lons = np.roll(wrapped, -shift)
     times = decode_times(ds, time_name) if time_name else []
-
-    variables, blocks, offset_bytes = [], [], 0
+    out = []
     for vname, v in ds.variables.items():
         dims = [d for d in v.dimensions if not (ds.dimensions[d] == 1 and d != time_name)]
-        if lat_name not in v.dimensions or lon_name not in v.dimensions or len(dims) > 3:
+        if grid.lat_name not in v.dimensions or grid.lon_name not in v.dimensions or len(dims) > 3:
             continue
-        x = ds.array(vname)
-        keep = tuple(slice(None) if d in dims else 0 for d in v.dimensions)
-        x = x[keep]                                   # (time?, lat, lon)
-        if dims[-2:] != [lat_name, lon_name]:
+        x = ds.array(vname)[tuple(slice(None) if d in dims else 0 for d in v.dimensions)]
+        if dims[-2:] != [grid.lat_name, grid.lon_name]:
             raise SystemExit(f"{vname}: expected (time, latitude, longitude) order, got {v.dimensions}")
         if x.ndim == 2:
             x = x[None]
-        if flip:
-            x = x[:, ::-1, :]
-        if drop_last:
-            x = x[:, :, :-1]
-        if shift:
-            x = np.roll(x, -shift, axis=2)
         attrs = {**v.attributes, **overrides.get(vname, {})}
         units = str(attrs.get("units", "1"))
-        q, scale, offset = quantise(x)
-        finite = x[np.isfinite(x)]
-        offsets = []
-        for t in range(q.shape[0]):
-            offsets.append(offset_bytes)
-            blocks.append(q[t].tobytes())
-            offset_bytes += q[t].nbytes
+        # GRIB-derived names read "Temperature @ Isobaric surface"; the level is stated instead.
+        long_name = str(attrs.get("long_name", vname)).split(" @ ")[0]
         entry = {
-            "name": vname,
-            "long_name": attrs.get("long_name", vname),
+            "name": f"{vname}@{level.replace(' ', '')}" if level else vname,
+            "long_name": f"{long_name} at {level}" if level else long_name,
             "standard_name": attrs.get("standard_name"),
             "units": UNIT_ALIASES.get(units, units),
-            "scale": scale, "offset": offset,
-            "min": float(finite.min()) if finite.size else None,
-            "max": float(finite.max()) if finite.size else None,
-            "p02": float(np.percentile(finite, 2)) if finite.size else None,
-            "p98": float(np.percentile(finite, 98)) if finite.size else None,
-            "coverage": round(float(finite.size / x.size), 4),
-            "offsets": offsets,
         }
+        if level:
+            entry["level"] = level
         if entry["units"] != units:
             entry["units_source"] = units
         if "cell_methods" in attrs:
             entry["cell_methods"] = attrs["cell_methods"]
-        variables.append(entry)
+        out.append((entry, grid.normalise(x)))
+    return grid, times, out
+
+
+def build(files: list[tuple[Path, str | None]], name: str, title: str, domain: str, source: dict,
+          overrides: dict, model: str | None = None) -> dict:
+    """A product from one or more files on the same grid; times common to all files are kept."""
+    parts = [read(path, level, overrides) for path, level in files]
+    grid = parts[0][0]
+    for g, _, _ in parts[1:]:
+        if g.meta != grid.meta:
+            raise SystemExit("the files are not on the same grid")
+    common = sorted(set.intersection(*(set(t) for _, t, _ in parts))) if parts[0][1] else []
+    variables, blocks, offset_bytes = [], [], 0
+    for _, times, entries in parts:
+        keep = [times.index(t) for t in common] if common else [0]
+        for entry, x in entries:
+            if entry["name"] in {v["name"] for v in variables}:
+                continue
+            x = x[keep]
+            q, scale, offset = quantise(x)
+            finite = x[np.isfinite(x)]
+            offsets = []
+            for t in range(q.shape[0]):
+                offsets.append(offset_bytes)
+                blocks.append(q[t].tobytes())
+                offset_bytes += q[t].nbytes
+            entry.update({
+                "scale": scale, "offset": offset,
+                "min": float(finite.min()) if finite.size else None,
+                "max": float(finite.max()) if finite.size else None,
+                "p02": float(np.percentile(finite, 2)) if finite.size else None,
+                "p98": float(np.percentile(finite, 98)) if finite.size else None,
+                "coverage": round(float(finite.size / x.size), 4),
+                "offsets": offsets,
+            })
+            variables.append(entry)
     if not variables:
         raise SystemExit("no variable on the latitude-longitude grid")
 
+    # Vectors: an eastward and a northward component of the same quantity, at the
+    # same level and with the same cell methods (an ensemble mean is not paired
+    # with a spread).
     vectors = []
     for v in variables:
         m = VECTOR.match(v["standard_name"] or "")
         if m and m.group(1) == "eastward":
-            partner = next((w for w in variables if w["standard_name"] == f"northward_{m.group(2)}"), None)
+            partner = next((w for w in variables if w["standard_name"] == f"northward_{m.group(2)}"
+                            and w.get("level") == v.get("level") and w.get("cell_methods") == v.get("cell_methods")), None)
             if partner:
-                vectors.append({"name": m.group(2), "u": v["name"], "v": partner["name"], "units": v["units"],
-                                "standard_name": m.group(2)})
+                vec = {"name": m.group(2) + (f"@{v['level'].replace(' ', '')}" if v.get("level") else ""),
+                       "u": v["name"], "v": partner["name"], "units": v["units"], "standard_name": m.group(2)}
+                if v.get("level"):
+                    vec["level"] = v["level"]
+                vectors.append(vec)
 
-    lat0 = float(lats.max()) if flip else float(lats[0])
-    grid = {"lon0": round(float(lons[0]), 6), "dlon": round(abs(dlon), 9), "nlon": int(nlon),
-            "lat0": round(lat0, 6), "dlat": round(abs(dlat), 9), "nlat": int(len(lats)),
-            "periodic": bool(periodic), "crs": "WGS 84 geographic coordinates (EPSG:4326), degrees",
-            "order": "rows north to south, columns eastward"}
     bin_path = OUT / f"fields-{name}.bin"
     OUT.mkdir(parents=True, exist_ok=True)
     with bin_path.open("wb") as out:
@@ -184,22 +233,24 @@ def build(nc_path: Path, name: str, title: str, domain: str, source: dict, overr
         "schema": "field-grid/1",
         "name": name, "title": title, "domain": domain,
         "source": source,
-        "grid": grid,
-        "times": times,
+        "grid": grid.meta,
+        "times": common,
         "time_scale": "UTC",
         "variables": variables,
         "vectors": vectors,
         "file": bin_path.name,
         "encoding": "int16 little-endian; value = q * scale + offset; q = -32768 means no value",
     }
+    if model:
+        product["model"] = model
     json_path = OUT / f"fields-{name}.json"
     json_path.write_text(json.dumps(product, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     register("fields", {
-        "name": name, "file": json_path.name, "title": title, "domain": domain,
-        "variables": [{k: v[k] for k in ("name", "long_name", "standard_name", "units")} for v in variables],
+        "name": name, "file": json_path.name, "title": title, "domain": domain, "model": model,
+        "variables": [{k: v.get(k) for k in ("name", "long_name", "standard_name", "units", "level")} for v in variables],
         "vectors": vectors,
-        "times": {"count": len(times), "first": times[0] if times else None, "last": times[-1] if times else None},
-        "grid": {k: grid[k] for k in ("dlon", "dlat", "nlon", "nlat")},
+        "times": {"count": len(common), "first": common[0] if common else None, "last": common[-1] if common else None},
+        "grid": {k: grid.meta[k] for k in ("dlon", "dlat", "nlon", "nlat")},
         "source": {k: source.get(k) for k in ("dataset", "profile", "provider", "credit", "retrieved_at")},
     })
     return product
@@ -207,7 +258,7 @@ def build(nc_path: Path, name: str, title: str, domain: str, source: dict, overr
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--source", help="a registered griddap dataset, already fetched")
+    parser.add_argument("--source", help="a registered griddap or ncss dataset, already fetched")
     parser.add_argument("--profile", help="the profile (cache folder) of the retrieval; default: the dataset's")
     parser.add_argument("--input", help="a netCDF classic file of our own, instead of --source")
     parser.add_argument("--name", help="product name (default: <source>-<profile>)")
@@ -215,6 +266,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--domain", default="climate", help="field of the data (with --input)")
     args = parser.parse_args(argv)
 
+    model = None
     if args.source:
         manifest = json.loads((DATA / "registry" / f"{args.source}.json").read_text(encoding="utf-8"))
         tag = args.profile or manifest.get("default_profile", "default")
@@ -224,7 +276,7 @@ def main(argv: list[str]) -> int:
                   file=sys.stderr)
             return 1
         retrieval = json.loads((folder / "retrieval.json").read_text(encoding="utf-8"))
-        nc_path = folder / manifest.get("file", "data.nc")
+        files = [(folder / r["file"], r.get("level")) for r in retrieval["requests"]]
         name = args.name or f"{args.source}-{tag}"
         title = manifest["title"].split(":")[0]
         source = {"dataset": manifest["id"], "profile": tag, "provider": manifest["provider"],
@@ -232,15 +284,16 @@ def main(argv: list[str]) -> int:
                   "licence": manifest["licence"], "citation": manifest["citation"],
                   "retrieved_at": retrieval["retrieved_at"], "request": retrieval["requests"][0]["url"]}
         domain, overrides = manifest.get("domain", "geography"), manifest.get("attributes", {})
+        model = manifest.get("model")
     elif args.input:
-        nc_path = Path(args.input)
-        name = args.name or nc_path.stem
-        title = args.title or nc_path.stem
-        source = {"dataset": None, "file": str(nc_path), "provider": "local file"}
+        files = [(Path(args.input), None)]
+        name = args.name or Path(args.input).stem
+        title = args.title or Path(args.input).stem
+        source = {"dataset": None, "file": args.input, "provider": "local file"}
         domain, overrides = args.domain, {}
     else:
         parser.error("give --source or --input")
-    product = build(nc_path, name, title, domain, source, overrides)
+    product = build(files, name, title, domain, source, overrides, model)
     g = product["grid"]
     print(f"fields-{name}: {len(product['variables'])} variable(s) "
           f"({', '.join(v['name'] for v in product['variables'])}), {len(product['times'])} time(s), "
