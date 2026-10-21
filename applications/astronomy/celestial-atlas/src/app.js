@@ -7,11 +7,14 @@ import { DEG, AU_KM, ICRS_TO_ECLIPTIC, ICRS_TO_GALACTIC, apply, sub, norm, toSph
 import { BODIES, BY_KEY, PLANETS, orbitalMu } from './core/bodies.js';
 import { snapshot } from './core/sky.js';
 import { osculating } from './core/kepler.js';
-import { loadStars, loadConstellations } from './data/catalog.js';
+import { loadStars, loadConstellations, listStarCatalogues } from './data/catalog.js';
 import { SolarSystemView } from './views/solar-system.js';
 import { NeighbourhoodView, LY_PER_PC, absoluteMagnitude } from './views/neighbourhood.js';
 import { SkyChartView } from './views/sky-chart.js';
 import { OrbitDiagramView } from './views/orbit-diagram.js';
+import { GalaxiesView } from './views/galaxies.js';
+import { HubbleDiagram, MassLightDiagram, HUBBLE_CONSTANT } from './views/galaxy-diagrams.js';
+import { listGalaxyCatalogues, loadGalaxies } from './data/catalog.js';
 
 const DATA = 'data';
 const STORAGE_KEY = 'celestial-atlas/v1';
@@ -24,7 +27,7 @@ const SPEEDS = [
 const RATES = [...SPEEDS.slice().reverse().map(([s, l]) => [-s, `${l}, backwards`]), ...SPEEDS];
 const REAL_TIME = SPEEDS.length;
 const SIZE_STEPS = [1, 10, 50, 100, 300, 600, 1500, 3000];
-const RADIUS_STEPS = [5, 10, 15, 20, 30, 50, 75, 100];
+const RADIUS_STEPS = [5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000];
 const PLACES = [
   { name: 'Tokyo', lat: 35.6812, lon: 139.7671, height: 0.04 },
   { name: 'Beijing', lat: 39.9042, lon: 116.4074, height: 0.05 },
@@ -33,7 +36,8 @@ const PLACES = [
   { name: 'Cerro Paranal', lat: -24.6272, lon: -70.4042, height: 2.64 },
   { name: 'Sydney', lat: -33.8688, lon: 151.2093, height: 0.03 },
 ];
-const VIEW_NAMES = { solar: 'Solar System', near: 'Neighbourhood', sky: 'Sky Chart', orbits: 'Orbits' };
+const VIEW_NAMES = { solar: 'Solar System', near: 'Neighbourhood', galaxies: 'Galaxies', sky: 'Sky Chart', orbits: 'Orbits' };
+const MLY_PER_MPC = 3.261563777;
 
 const $ = (selector) => document.querySelector(selector);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -66,13 +70,16 @@ const state = {
     near: { kind: 'star', index: null },
     sky: { kind: 'body', key: 'moon' },
     orbits: { kind: 'body', key: 'mars' },
+    galaxies: { kind: 'galaxy', index: null },
   },
   options: {
     solar: { size: 5, orbits: true, labels: true, stars: true, constellations: false, grid: true },
-    near: { radius: 3, labels: true, grid: true },
+    near: { catalogue: 'stars-v1', radius: 2, labels: true, grid: true },
     sky: { magLimit: 5.5, lines: true, names: true, nameLang: 'la', ecliptic: true, grid: true,
       refraction: true, starNames: true },
     orbits: { range: 'inner', sightLines: true },
+    galaxies: { catalogue: 'galaxies-ungc', mode: 'map', relations: 'published', field: false,
+      colourBy: 'relation', minMembers: 3, labels: true, grid: true },
   },
 };
 for (const view of Object.keys(state.options)) Object.assign(state.options[view], saved.options?.[view]);
@@ -163,33 +170,98 @@ function bodyInfo(snap, key) {
 }
 
 function starInfo(stars, i) {
+  const gaia = stars.photometry === 'gaia';
+  const band = gaia ? 'G' : 'V';
   const rows = [];
   const dist = stars.dist[i];
   if (Number.isFinite(dist)) {
-    rows.push(['Distance', `${dist.toFixed(2)} pc · ${(dist * LY_PER_PC).toFixed(1)} ly`]);
+    const digits = dist < 100 ? 2 : 0;
+    rows.push(['Distance', `${dist.toFixed(digits)} pc · ${(dist * LY_PER_PC).toFixed(dist < 100 ? 1 : 0)} ly`]);
   }
-  rows.push(['Apparent magnitude', signed(stars.mag[i], 2)]);
-  if (Number.isFinite(dist)) rows.push(['Absolute magnitude', signed(absoluteMagnitude(stars.mag[i], dist), 2)]);
+  rows.push([`Apparent magnitude (${band})`, signed(stars.mag[i], 2)]);
+  if (Number.isFinite(dist)) rows.push([`Absolute magnitude (${band})`, signed(absoluteMagnitude(stars.mag[i], dist), 2)]);
   if (stars.spectrum(i)) rows.push(['Spectral type', stars.spectrum(i)]);
-  if (Number.isFinite(stars.ci[i])) rows.push(['B − V', signed(stars.ci[i], 2)]);
+  if (Number.isFinite(stars.ci[i])) rows.push([gaia ? 'BP − RP' : 'B − V', signed(stars.ci[i], 2)]);
   const u = [stars.unit[3 * i], stars.unit[3 * i + 1], stars.unit[3 * i + 2]];
   const eq = toSpherical(u);
-  rows.push(['Right ascension (J2000)', formatRA(eq.lon)]);
-  rows.push(['Declination (J2000)', formatDec(eq.lat)]);
+  rows.push([`Right ascension (${stars.epoch})`, formatRA(eq.lon)]);
+  rows.push([`Declination (${stars.epoch})`, formatDec(eq.lat)]);
   const g = toSpherical(apply(ICRS_TO_GALACTIC, u));
   rows.push(['Galactic l, b', `${(g.lon / DEG).toFixed(1)}°, ${(g.lat / DEG).toFixed(1)}°`]);
+  const designation = stars.designation(i);
   return {
-    title: stars.label(i) || 'Unnamed star',
-    subtitle: stars.name(i) && stars.designation(i) ? stars.designation(i) : 'Star',
+    title: stars.label(i) || designation || 'Unnamed star',
+    subtitle: stars.label(i) && designation && designation !== stars.label(i) ? designation : stars.title,
+    rows,
+  };
+}
+
+function morphology(t) {
+  if (!Number.isFinite(t)) return 'Galaxy';
+  if (t <= -4) return 'Elliptical galaxy';
+  if (t <= -1) return 'Lenticular galaxy';
+  if (t <= 8) return 'Spiral galaxy';
+  if (t <= 9) return 'Magellanic spiral';
+  if (t <= 10) return 'Irregular galaxy';
+  return `Galaxy, type ${t}`;
+}
+
+function galaxyInfo(cat, i, options) {
+  const rows = [];
+  if (cat.kind === 'tidal') {
+    const rel = cat.relations[options.relations];
+    const pub = cat.relations.published, ours = cat.relations.ours;
+    const d = cat.dist[i];
+    rows.push(['Distance', `${d.toFixed(2)} Mpc`]);
+    rows.push(['Light-travel', `${(d * MLY_PER_MPC).toFixed(1)} million years`]);
+    if (cat.distMethod[i]) rows.push(['Distance method', cat.distMethod[i]]);
+    if (Number.isFinite(cat.catalogueLogL[i])) rows.push(['log L_K (solar)', cat.catalogueLogL[i].toFixed(2)]);
+    else if (Number.isFinite(cat.logL[i])) rows.push(['log L_K, inferred', cat.logL[i].toFixed(2)]);
+    if (Number.isFinite(cat.vLG[i])) {
+      rows.push(['Velocity (Local Group)', `${signed(cat.vLG[i], 0)} km/s`]);
+      rows.push(['Peculiar velocity', `${signed(cat.vLG[i] - HUBBLE_CONSTANT * d, 0)} km/s`]);
+    }
+    if (Number.isFinite(pub.theta1[i])) rows.push(['Θ₁ published', signed(pub.theta1[i], 1)]);
+    if (Number.isFinite(ours.theta1[i])) rows.push(['Θ₁ recomputed', signed(ours.theta1[i], 2)]);
+    const md = pub.disturber[i];
+    const sep = (k) => Math.hypot(cat.exact[3 * k] - cat.exact[3 * i], cat.exact[3 * k + 1] - cat.exact[3 * i + 1],
+      cat.exact[3 * k + 2] - cat.exact[3 * i + 2]);
+    if (md >= 0) rows.push(['Main disturber', `${cat.names[md]}, ${sep(md).toFixed(2)} Mpc`]);
+    else if (cat.publishedDisturberName[i]) {
+      rows.push(['Main disturber', `${cat.publishedDisturberName[i]}, outside the catalogue`]);
+    }
+    const od = ours.disturber[i];
+    if (od >= 0 && od !== md) rows.push(['Recomputed disturber', `${cat.names[od]}, ${sep(od).toFixed(2)} Mpc`]);
+    const g = rel.groups.groups[rel.groups.groupOf[i]];
+    rows.push(['Tidal group', g.size > 1 ? `${cat.names[g.leader]} · ${g.size}` : 'none (field)']);
+    const dwarf = cat.dwarfType[i] ? ` · dwarf ${cat.dwarfType[i]}` : '';
+    return { title: cat.names[i], subtitle: `${morphology(cat.type[i])}${dwarf}`, rows };
+  }
+  const gr = cat.groups, j = cat.groupOf[i];
+  rows.push(['PGC', String(cat.pgc[i])]);
+  rows.push(['Velocity (CMB)', `${cat.vCMB[i].toFixed(0)} km/s`]);
+  rows.push(['Distance', `${cat.dist[i].toFixed(1)} h⁻¹ Mpc`]);
+  if (Number.isFinite(cat.logL[i])) rows.push(['log L_K (solar)', cat.logL[i].toFixed(2)]);
+  if (Number.isFinite(cat.kmag[i])) rows.push(['Ks magnitude', cat.kmag[i].toFixed(2)]);
+  if (gr.nHere[j] > 1) {
+    rows.push(['Group members', `${gr.nHere[j]}`]);
+    if (Number.isFinite(gr.sigmaV[j])) rows.push(['Dispersion σ', `${gr.sigmaV[j].toFixed(0)} km/s`]);
+    if (Number.isFinite(gr.r2t[j])) rows.push(['Radius R₂ₜ', `${gr.r2t[j].toFixed(2)} Mpc`]);
+    if (gr.mVir[j] > 0) rows.push(['Virial mass', `${(gr.mVir[j]).toPrecision(3)} × 10¹² M☉`]);
+    if (gr.mLum[j] > 0) rows.push(['Mass from light', `${(gr.mLum[j]).toPrecision(3)} × 10¹² M☉`]);
+  }
+  return {
+    title: cat.galaxyName(i),
+    subtitle: gr.nHere[j] > 1 ? (cat.groupName(j) || `Group ${gr.nest[j]}`) : `${morphology(cat.type[i])} · field`,
     rows,
   };
 }
 
 function renderInfo(info) {
   const html = info
-    ? `<h2>${esc(info.title)}</h2><p class="sub">${esc(info.subtitle)}</p>`
+    ? `<h2${info.title.length > 18 ? ' class="long"' : ''}>${esc(info.title)}</h2><p class="sub">${esc(info.subtitle)}</p>`
       + `<dl>${info.rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>`
-    : '<p class="hint">Select a star to see its details.</p>';
+    : `<p class="hint">Select a ${state.view === 'galaxies' ? 'galaxy' : 'star'} to see its details.</p>`;
   const target = $('#info');
   if (target.dataset.html !== html) {
     target.innerHTML = html;
@@ -201,18 +273,27 @@ function renderInfo(info) {
 
 async function main() {
   const progress = $('#loading-bar');
-  const [spk, stars, constellations] = await Promise.all([
+  const [spk, stars, constellations, catalogues, galaxyCatalogues] = await Promise.all([
     SPK.fromUrl(`${DATA}/jpl-de440s/de440s.bsp`, (p) => { progress.style.width = `${(p * 100).toFixed(1)}%`; }),
     loadStars(DATA),
     loadConstellations(DATA),
+    listStarCatalogues(DATA),
+    listGalaxyCatalogues(DATA),
   ]);
+  if (!catalogues.some((c) => c.name === state.options.near.catalogue)) state.options.near.catalogue = 'stars-v1';
+  if (!galaxyCatalogues.some((c) => c.name === state.options.galaxies.catalogue)) {
+    state.options.galaxies.catalogue = galaxyCatalogues[0]?.name || '';
+  }
+  const loadedCatalogues = new Map([[stars.name, stars]]);
+  const loadedGalaxies = new Map();
+  let galaxies = null;
   const minMs = unixMsFromJdTDB(J2000 + spk.coverage.startEt / DAY) + 2 * 86400000;
   const maxMs = unixMsFromJdTDB(J2000 + spk.coverage.endEt / DAY) - 2 * 86400000;
 
   const stage = $('#stage');
   const renderer = new THREE.WebGLRenderer({ canvas: $('#gl'), antialias: true, logarithmicDepthBuffer: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setClearColor(0x150c13, 1);
+  renderer.setClearColor(0x120d14, 1);
 
   const views = {
     solar: new SolarSystemView({ renderer, container: stage, stars, constellations,
@@ -220,8 +301,18 @@ async function main() {
     near: new NeighbourhoodView({ renderer, container: stage, stars, onSelect: (i) => selectStar(i) }),
     sky: new SkyChartView({ canvas: $('#chart'), stars, constellations }),
     orbits: new OrbitDiagramView({ canvas: $('#chart') }),
+    galaxies: new GalaxiesView({ renderer, container: stage, onSelect: (i) => selectGalaxy(i, { focus: true }) }),
+    hubble: new HubbleDiagram($('#chart')),
+    massLight: new MassLightDiagram($('#chart')),
   };
-  const is3d = (v) => v === 'solar' || v === 'near';
+  const galaxyMap = () => state.options.galaxies.mode === 'map';
+  const is3d = (v) => v === 'solar' || v === 'near' || (v === 'galaxies' && galaxyMap());
+  // The view object that draws the current tab.
+  const active = () => {
+    if (state.view !== 'galaxies') return views[state.view];
+    if (galaxyMap()) return views.galaxies;
+    return galaxies?.kind === 'groups' ? views.massLight : views.hubble;
+  };
   let dirty = true;
   let lastDrawnMs = 0;
   let snap = null;
@@ -232,9 +323,68 @@ async function main() {
       stars: o.solar.stars, constellations: o.solar.constellations, grid: o.solar.grid });
     if (views.near.radius !== RADIUS_STEPS[o.near.radius]) views.near.setRadius(RADIUS_STEPS[o.near.radius]);
     views.near.setOptions({ labels: o.near.labels, grid: o.near.grid });
+    if (views.near.stars.name !== o.near.catalogue) useCatalogue(o.near.catalogue);
     views.sky.setOptions(o.sky);
     views.orbits.setOptions(o.orbits);
+    const g = o.galaxies;
+    views.galaxies.setOptions({ relations: g.relations, field: g.field, colourBy: g.colourBy,
+      minMembers: g.minMembers, labels: g.labels, grid: g.grid });
+    if (state.view === 'galaxies' && g.catalogue && galaxies?.name !== g.catalogue) useGalaxies(g.catalogue);
     dirty = true;
+  }
+
+  // Galaxy catalogues are loaded when the Galaxies view first needs them.
+  async function useGalaxies(name) {
+    let cat = loadedGalaxies.get(name);
+    if (!cat) {
+      const entry = galaxyCatalogues.find((c) => c.name === name);
+      if (!entry) return;
+      toast(`Loading ${entry.title}…`);
+      try {
+        cat = await loadGalaxies(DATA, entry);
+      } catch (error) {
+        toast(`Could not load ${name}: ${error.message}`);
+        return;
+      }
+      loadedGalaxies.set(name, cat);
+    }
+    if (state.options.galaxies.catalogue !== name) return;
+    galaxies = cat;
+    views.galaxies.setCatalogue(cat);
+    state.selection.galaxies = { kind: 'galaxy', index: null };
+    views.hubble.selected = views.massLight.selected = null;
+    if (state.view === 'galaxies') showView('galaxies');
+    dirty = true;
+  }
+
+  function selectGalaxy(index, { focus = false } = {}) {
+    if (!galaxies || index == null) return;
+    state.selection.galaxies = { kind: 'galaxy', index };
+    views.galaxies.select(index);
+    views.hubble.selected = views.massLight.selected = index;
+    if (focus && galaxyMap()) views.galaxies.focusGalaxy(index);
+    dirty = true;
+    updatePanel(true);
+  }
+
+  // Star catalogues for the neighbourhood are loaded when first chosen.
+  async function useCatalogue(name) {
+    let catalogue = loadedCatalogues.get(name);
+    if (!catalogue) {
+      toast(`Loading ${catalogues.find((c) => c.name === name)?.title || name}…`);
+      try {
+        catalogue = await loadStars(DATA, name);
+      } catch (error) {
+        toast(`Could not load ${name}: ${error.message}`);
+        return;
+      }
+      loadedCatalogues.set(name, catalogue);
+    }
+    if (state.options.near.catalogue !== name) return;   // another choice was made meanwhile
+    views.near.setStars(catalogue);
+    state.selection.near = { kind: 'star', index: null };
+    updateLegend();
+    updatePanel(true);
   }
 
   function selectBody(key, { focus = false } = {}) {
@@ -266,6 +416,8 @@ async function main() {
     $('#chart').hidden = is3d(view);
     views.solar.setActive(view === 'solar');
     views.near.setActive(view === 'near');
+    views.galaxies.setActive(view === 'galaxies' && galaxyMap() && !!galaxies);
+    if (view === 'galaxies' && !galaxies && state.options.galaxies.catalogue) useGalaxies(state.options.galaxies.catalogue);
     const sel = state.selection[view];
     if (view === 'solar') { views.solar.select(sel.key); }
     if (view === 'sky') views.sky.selectedKey = sel.key;
@@ -298,7 +450,12 @@ async function main() {
         <div class="chips">${BODIES.map((b) => `<button type="button" data-focus="${b.key}">`
           + `<span class="dot" style="background:${b.colour}"></span>${b.name}</button>`).join('')}</div>`;
     } else if (v === 'near') {
-      html = `<h3>Display</h3>
+      html = `<h3>Catalogue</h3>
+        <select data-view-option="near" data-key="catalogue" class="wide">
+          ${catalogues.map((c) => `<option value="${esc(c.name)}"${c.name === o.catalogue ? ' selected' : ''}>`
+            + `${esc(c.title)} · ${Number(c.count).toLocaleString('en')} stars</option>`).join('')}</select>
+        <p class="legend">More catalogues: <code>python data/acquisition/fetch.py --list</code></p>
+        <h3>Display</h3>
         <label class="range"><span>Radius</span>
           <input type="range" min="0" max="${RADIUS_STEPS.length - 1}" step="1" value="${o.radius}" data-view-option="near" data-key="radius"></label>
         <p class="legend" id="legend"></p>
@@ -323,6 +480,8 @@ async function main() {
             `<option value="${k}"${o.nameLang === k ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
         ${check('sky', 'starNames', 'Bright star names')}${check('sky', 'ecliptic', 'Ecliptic')}
         ${check('sky', 'grid', 'Altitude grid')}${check('sky', 'refraction', 'Refraction')}`;
+    } else if (v === 'galaxies') {
+      html = galaxyOptions(o);
     } else {
       html = `<h3>Range</h3>
         <div class="segmented">
@@ -336,12 +495,61 @@ async function main() {
     updateLegend();
   }
 
+  function galaxyOptions(o) {
+    if (!galaxyCatalogues.length) {
+      return `<h3>Catalogue</h3><p class="legend">No galaxy catalogue yet. From the repository root:<br>
+        <code>python data/acquisition/fetch.py ungc</code><br>
+        <code>python data/products/galaxy_catalog.py --source ungc</code></p>`;
+    }
+    const tidal = galaxies?.kind === 'tidal';
+    let html = `<h3>Catalogue</h3>
+      <select data-view-option="galaxies" data-key="catalogue" class="wide">
+        ${galaxyCatalogues.map((c) => `<option value="${esc(c.name)}"${c.name === o.catalogue ? ' selected' : ''}>`
+          + `${esc(c.title)} · ${Number(c.count).toLocaleString('en')}</option>`).join('')}</select>
+      <div class="segmented spaced">
+        <button type="button" data-mode="map" aria-pressed="${o.mode === 'map'}">3D map</button>
+        <button type="button" data-mode="diagram" aria-pressed="${o.mode === 'diagram'}">${tidal ? 'Hubble flow' : 'Mass and light'}</button>
+      </div>
+      <p class="legend" id="legend"></p>
+      <h3>Relations</h3>`;
+    if (!galaxies) return `${html}<p class="legend">Loading…</p>`;
+    if (tidal) {
+      const a = galaxies.agreement;
+      html += `<label class="select"><span>Main disturbers</span><select data-view-option="galaxies" data-key="relations">
+          <option value="published"${o.relations === 'published' ? ' selected' : ''}>Published</option>
+          <option value="ours"${o.relations === 'ours' ? ' selected' : ''}>Recomputed here</option></select></label>
+        ${check('galaxies', 'field', 'Relations of field galaxies (Θ₁ ≤ 0)')}
+        <p class="legend">Recomputed main disturbers agree with the published ones for
+          ${(100 * a.agree / a.comparable).toFixed(1)} % of ${a.comparable} galaxies.</p>`;
+    } else {
+      html += `<label class="range"><span>Link members of groups with at least ${o.minMembers} galaxies</span>
+        <input type="range" min="2" max="30" step="1" value="${o.minMembers}" data-view-option="galaxies" data-key="minMembers"></label>`;
+    }
+    html += `<h3>Display</h3>
+      <label class="select"><span>Colour</span><select data-view-option="galaxies" data-key="colourBy">
+        <option value="relation"${o.colourBy === 'relation' ? ' selected' : ''}>${tidal ? 'Tidal index' : 'Group size'}</option>
+        <option value="type"${o.colourBy === 'type' ? ' selected' : ''}>Morphological type</option></select></label>
+      ${check('galaxies', 'labels', 'Names')}${check('galaxies', 'grid', 'Supergalactic plane')}
+      <h3>${tidal ? 'Largest tidal groups' : 'Richest groups'}</h3><div class="chips">`;
+    if (tidal) {
+      const rel = galaxies.relations[o.relations];
+      html += rel.groups.groups.filter((g) => g.size >= 3).slice(0, 10).map((g) =>
+        `<button type="button" data-galaxy="${g.leader}">${esc(galaxies.names[g.leader])} · ${g.size}</button>`).join('');
+    } else {
+      const gr = galaxies.groups;
+      const ranked = [...gr.names.keys()].sort((x, y) => gr.nHere[y] - gr.nHere[x]).slice(0, 12);
+      html += ranked.map((j) => `<button type="button" data-group="${j}">${esc(gr.names.get(j))} · ${gr.nHere[j]}</button>`).join('');
+    }
+    return `${html}</div>`;
+  }
+
   function updateLegend() {
     const el = $('#legend');
     if (!el) return;
     if (state.view === 'solar') el.textContent = views.solar.legend();
     if (state.view === 'near') el.textContent = views.near.legend();
     if (state.view === 'sky') el.textContent = `Stars to magnitude ${state.options.sky.magLimit}`;
+    if (state.view === 'galaxies') el.textContent = views.galaxies.legend();
   }
 
   $('#options').addEventListener('input', (event) => {
@@ -350,13 +558,31 @@ async function main() {
     const value = t.type === 'checkbox' ? t.checked : t.type === 'range' ? Number(t.value) : t.value;
     state.options[t.dataset.viewOption][t.dataset.key] = value;
     applyOptions();
+    if (t.dataset.viewOption === 'galaxies' && t.dataset.key === 'relations') renderOptions();
+    if (t.dataset.viewOption === 'galaxies' && t.dataset.key === 'minMembers') {
+      t.closest('label').querySelector('span').textContent = `Link members of groups with at least ${value} galaxies`;
+    }
     updateLegend();
+    updatePanel(true);
     save();
   });
 
   $('#options').addEventListener('click', (event) => {
     const focus = event.target.closest('[data-focus]');
     if (focus) selectBody(focus.dataset.focus, { focus: true });
+    const mode = event.target.closest('[data-mode]');
+    if (mode) {
+      state.options.galaxies.mode = mode.dataset.mode;
+      showView('galaxies');
+    }
+    const galaxy = event.target.closest('[data-galaxy]');
+    if (galaxy) selectGalaxy(Number(galaxy.dataset.galaxy), { focus: true });
+    const group = event.target.closest('[data-group]');
+    if (group && galaxies?.kind === 'groups') {
+      const j = Number(group.dataset.group);
+      if (galaxies.groups.brightest[j] >= 0) selectGalaxy(galaxies.groups.brightest[j]);
+      if (galaxyMap()) views.galaxies.focusGroupCentre(j);
+    }
     const range = event.target.closest('[data-range]');
     if (range) {
       state.options.orbits.range = range.dataset.range;
@@ -405,6 +631,9 @@ async function main() {
     if (state.view === 'solar') {
       const key = views.solar.pick(ndc);
       if (key) selectBody(key);
+    } else if (state.view === 'galaxies') {
+      const index = views.galaxies.pick(ndc);
+      if (index != null) selectGalaxy(index);
     } else {
       const index = views.near.pick(ndc);
       if (index != null) selectStar(index);
@@ -416,9 +645,9 @@ async function main() {
     const rect = chart.getBoundingClientRect();
     return [e.clientX - rect.left, e.clientY - rect.top];
   };
-  const hitId = (hit) => (hit ? `${hit.kind}:${hit.key ?? hit.index}` : '');
+  const hitId = (hit) => (hit ? `${hit.kind}:${hit.key ?? hit.group ?? hit.index}` : '');
   chart.addEventListener('pointermove', (e) => {
-    const view = views[state.view];
+    const view = active();
     const hit = view.hitTest(...chartPoint(e));
     if (hitId(hit) !== hitId(view.hover)) {
       view.hover = hit;
@@ -426,11 +655,12 @@ async function main() {
       dirty = true;
     }
   });
-  chart.addEventListener('pointerleave', () => { views[state.view].hover = null; dirty = true; });
+  chart.addEventListener('pointerleave', () => { active().hover = null; dirty = true; });
   chart.addEventListener('click', (e) => {
-    const hit = views[state.view].hitTest(...chartPoint(e));
+    const hit = active().hitTest(...chartPoint(e));
     if (!hit) return;
     if (hit.kind === 'body') selectBody(hit.key);
+    else if (hit.kind === 'galaxy' || hit.kind === 'group') selectGalaxy(hit.index);
     else selectStar(hit.index);
   });
 
@@ -499,7 +729,12 @@ async function main() {
     if (!snap || (!force && now - lastPanel < 250)) return;
     lastPanel = now;
     const sel = state.selection[state.view];
-    renderInfo(sel.kind === 'body' ? bodyInfo(snap, sel.key) : sel.index != null ? starInfo(stars, sel.index) : null);
+    if (state.view === 'galaxies') {
+      renderInfo(galaxies && sel.index != null ? galaxyInfo(galaxies, sel.index, state.options.galaxies) : null);
+      return;
+    }
+    const starSource = state.view === 'near' ? views.near.stars : stars;
+    renderInfo(sel.kind === 'body' ? bodyInfo(snap, sel.key) : sel.index != null ? starInfo(starSource, sel.index) : null);
     if (state.view === 'orbits') renderConfiguration();
   }
 
@@ -539,6 +774,9 @@ async function main() {
     views.near.resize(width, height);
     views.sky.resize(width, height);
     views.orbits.resize(width, height);
+    views.galaxies.resize(width, height);
+    views.hubble.resize(width, height);
+    views.massLight.resize(width, height);
     dirty = true;
   }
   new ResizeObserver(resize).observe(stage);
@@ -559,8 +797,18 @@ async function main() {
       updateTimebar(true);
     }
     snap = snapshot(spk, scalesFromUnixMs(state.ms), observer());
-    const view = views[state.view];
-    if (is3d(state.view)) {
+    const view = active();
+    if (state.view === 'galaxies') {
+      if (!galaxies) {
+        if (galaxyMap()) renderer.clear();
+      } else if (galaxyMap()) {
+        view.update(snap, dt);
+        view.render();
+      } else if (dirty) {
+        view.draw(galaxies, galaxies.relations?.[state.options.galaxies.relations]);
+        dirty = false;
+      }
+    } else if (is3d(state.view)) {
       view.update(snap, dt);
       view.render();
     } else {

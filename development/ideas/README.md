@@ -18,3 +18,4 @@ This is the cheapest place to write a thought down. An idea here may be wrong, a
 | 2026-10-21 | [Meshes as cell complexes](2026-10-21-meshes-as-cell-complexes.md) | seed |
 | 2026-10-21 | [The tidal spectrum as a lattice](2026-10-21-tidal-spectrum-as-lattice.md) | seed |
 | 2026-10-21 | [Learning from operational ocean models](2026-10-21-learning-from-ocean-models.md) | seed |
+| 2026-10-22 | [Cosmic flows from peculiar velocities](2026-10-22-cosmic-flows.md) | seed |

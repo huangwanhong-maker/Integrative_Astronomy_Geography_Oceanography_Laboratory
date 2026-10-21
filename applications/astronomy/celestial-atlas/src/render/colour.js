@@ -4,21 +4,21 @@
 //   Ballesteros (2012), EPL 97, 34008: effective temperature from B-V.
 //   Helland (2012), "How to convert temperature (K) to RGB": blackbody fit.
 
-// Pink: rose-plum nights with rose and blush accents; blush paper with
-// rose-plum ink for the charts.
+// Dusty Orchid (#CA8DBE) as the main colour: plum nights with orchid accents;
+// orchid-tinted paper with plum ink for the charts.
 export const PALETTE = {
-  night: '#1b1018',
-  text: '#fdf0f5',
-  textDim: '#d4b2c3',
-  pink: '#ff7eb0',
-  blush: '#ffb0d2',
-  accentDeep: '#c23a75',
-  roseDeep: '#b65a86',
+  night: '#18121a',
+  text: '#f6eef5',
+  textDim: '#cdb6c8',
+  accent: '#CA8DBE',
+  blush: '#e8c3dc',
+  accentDeep: '#8e4f82',
+  roseDeep: '#a7709b',
   gold: '#f6c47e',
   goldDeep: '#c98a2e',
-  paper: '#fdf3f6',
-  ink: '#3e2533',
-  inkSoft: '#8c6678',
+  paper: '#fbf6fa',
+  ink: '#3a2a3a',
+  inkSoft: '#86707f',
 };
 
 // rgba() of a palette colour.
@@ -48,6 +48,44 @@ export function starRgb(bv) {
   const index = Number.isFinite(bv) ? clamp(bv, -0.4, 2.0) : 0.65;
   return temperatureToRgb(bvToTemperature(index));
 }
+
+// Effective temperature from Gaia BP-RP, for dwarfs, without reddening
+// correction (Mucciarelli & Bellazzini 2020, RNAAS 4, 52; solar metallicity).
+// The quadratic is calibrated for 0.39 < BP-RP < 1.5 and extrapolated outside.
+export function bpRpToTemperature(bpRp) {
+  const c = clamp(bpRp, -0.5, 5);
+  return 5040 / (0.4929 + 0.5092 * c - 0.0353 * c * c);
+}
+
+// Star colour for a catalogue's photometric system: 'johnson' (B-V) or 'gaia' (BP-RP).
+export function starColour(photometry, index) {
+  if (photometry === 'gaia') {
+    return temperatureToRgb(Number.isFinite(index) ? bpRpToTemperature(index) : 5800);
+  }
+  return starRgb(index);
+}
+
+// Linear interpolation through colour stops [[t, '#rrggbb'], ...] sorted by t.
+export function ramp(stops, t) {
+  if (!Number.isFinite(t)) return hexToRgb(stops[0][1]);
+  if (t <= stops[0][0]) return hexToRgb(stops[0][1]);
+  for (let k = 1; k < stops.length; k++) {
+    if (t <= stops[k][0]) {
+      const [t0, c0] = stops[k - 1], [t1, c1] = stops[k];
+      const a = hexToRgb(c0), b = hexToRgb(c1), f = (t - t0) / (t1 - t0);
+      return a.map((x, i) => x + (b[i] - x) * f);
+    }
+  }
+  return hexToRgb(stops[stops.length - 1][1]);
+}
+
+// Galaxy colours. Tidal index: field galaxies lavender-blue, bound galaxies
+// orchid, deepening with the strength of the tie. Group size: single galaxies
+// lavender-blue, groups orchid, rich clusters gold. Morphology (de Vaucouleurs
+// T): early types gold, spirals orchid, irregulars blue.
+export const TIDAL_STOPS = [[-2, '#9fb0ff'], [0, '#eadcf0'], [1.5, '#dca4cf'], [3.5, '#c06aae']];
+export const TYPE_STOPS = [[-5, '#f6b26b'], [0, '#f6d29a'], [3, '#f0d6e8'], [7, '#dca4cf'], [9, '#a9c4ff'], [11, '#8fb3ff']];
+export const GROUP_STOPS = [[0, '#9fb0ff'], [0.5, '#eadcf0'], [1.2, '#dca4cf'], [2, '#f6c47e']];
 
 export function hexToRgb(hex) {
   const n = parseInt(hex.slice(1), 16);

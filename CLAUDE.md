@@ -245,7 +245,7 @@ Each module directory contains:
 
 - Record decisions that shape structure, conventions or tooling in `development/decisions/NNNN-slug.md`, using the template in the index.
 - Never rewrite a record. A new record supersedes or amends it, and the old record's status is updated to point to the new one.
-- Records accepted so far: 0001–0011.
+- Records accepted so far: 0001–0013.
 
 ### 6.4 Change Discipline
 
@@ -283,7 +283,10 @@ Each module directory contains:
   - Serve locally with Python's standard library.
   - Test with Node (v22 is installed).
   - Check visually by driving headless Chrome over the DevTools protocol.
-- **Visual style:** a pink palette: rose-plum nights, rose and blush accents, blush paper for charts, and serif type (Source Serif 4).
+- **Visual style:**
+  - The Celestial Atlas uses Dusty Orchid (#CA8DBE) as its main colour, chosen by the user: plum nights, orchid accents and orchid-tinted paper for charts.
+  - All interfaces use serif type (Source Serif 4).
+  - Each application may carry its own main colour within the warm, gentle family the user prefers.
 - **Version control.**
   - The laboratory's remote is `https://github.com/huangwanhong-maker/Integrative_Astronomy_Geography_Oceanography_Laboratory`.
   - The libraries' remotes are `https://github.com/huangwanhong-maker/{calx,morphe,physis}`.
@@ -313,17 +316,23 @@ Each module directory contains:
 
 As of 2026-10-22:
 
-- The architecture and decision records 0001–0011 are written.
+- The architecture and decision records 0001–0013 are written.
 - The layered directory structure is in place, with READMEs.
 - The three libraries are scaffolded as their own git repositories and attached under `lib/`.
 - All four repositories are published on GitHub.
 - The first application, `applications/astronomy/celestial-atlas`, works ([ADR 0011](development/decisions/0011-first-application-celestial-atlas.md)).
-  - It is a web application with four views over DE440 and the HYG star catalogue, at any instant or live.
-  - Its computation is provisional JavaScript, tested against JPL Horizons. Run the tests with `node applications/astronomy/celestial-atlas/tests/run-tests.mjs`.
-- `data/` has working parts:
-  - registry manifests for three datasets;
-  - `acquisition/fetch.py`;
-  - `products/star_catalog.py`.
+  - It is a web application with five views:
+    - Solar System;
+    - stellar neighbourhood, from HYG or Gaia;
+    - galaxies and their relations;
+    - sky chart;
+    - orbits.
+  - It shows any instant from 1849 to 2150, or live.
+  - Its computation is provisional JavaScript, tested against JPL Horizons, Meeus, Tully (2015) and Karachentsev et al. (2013): 47 checks, run with `node applications/astronomy/celestial-atlas/tests/run-tests.mjs`.
+- `data/` is a general data library ([ADR 0012](development/decisions/0012-selectable-parameterised-datasets.md)):
+  - Manifests choose which data and how much: fixed files, or TAP catalogue queries with parameters and profiles.
+  - The TAP client serves ESA Gaia, CDS VizieR and SIMBAD.
+  - Products are listed in an index that applications read.
 - There is no C++ code yet.
 
 The next step is roadmap Phase 0.

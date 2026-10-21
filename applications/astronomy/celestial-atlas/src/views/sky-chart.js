@@ -9,7 +9,7 @@ import { PALETTE, rgba } from '../render/colour.js';
 import { LabelPlacer } from '../render/declutter.js';
 
 const SERIF = "'Source Serif 4', Georgia, 'Times New Roman', serif";
-const NIGHT_SKY = [255, 249, 251];
+const NIGHT_SKY = [255, 250, 253];
 const DAY_SKY = [252, 226, 216];
 
 const mix = (a, b, t) => a.map((x, i) => Math.round(x + (b[i] - x) * t));
@@ -225,7 +225,7 @@ export class SkyChartView {
       ctx.fillStyle = ink;
       ctx.fill();
       if (m < 4.5) this.hits.push({ kind: 'star', index: i, x: p[0], y: p[1], r: radius });
-      if (options.starNames && m < 1.6 && stars.name(i)) names.push({ text: stars.name(i), x: p[0], y: p[1], r: radius });
+      if (options.starNames && m < 1.6 && stars.starName(i)) names.push({ text: stars.starName(i), x: p[0], y: p[1], r: radius });
     }
     return names;
   }

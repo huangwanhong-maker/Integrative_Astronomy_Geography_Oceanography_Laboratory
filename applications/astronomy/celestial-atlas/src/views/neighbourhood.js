@@ -1,17 +1,18 @@
-// The Sun's stellar neighbourhood in three dimensions, from Hipparcos distances,
-// in galactic coordinates (parsecs): x towards the galactic centre, y in the
-// direction of galactic rotation, z towards the north galactic pole.
+// The Sun's stellar neighbourhood in three dimensions, from catalogue distances
+// (Hipparcos through HYG, or Gaia), in galactic coordinates (parsecs): x towards
+// the galactic centre, y in the direction of galactic rotation, z towards the
+// north galactic pole.
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { ICRS_TO_GALACTIC, apply } from '../core/frames.js';
 import { starPoints, magnitudeStyle } from '../render/points.js';
-import { starRgb } from '../render/colour.js';
+import { starColour } from '../render/colour.js';
 import { declutter } from '../render/declutter.js';
 
 export const LY_PER_PC = 3.261563777;
-const RING_RADII = [5, 10, 25, 50, 100];
+const RING_RADII = [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000];
 const MAX_NAMED_LABELS = 32;
 const NEAREST_LABELS = 6;
 
@@ -70,6 +71,32 @@ export class NeighbourhoodView {
   setRadius(radius) {
     const previous = this.radius;
     this.radius = radius;
+    this.rebuild();
+    if (previous) {
+      this.camera.position.multiplyScalar(radius / previous);
+    } else {
+      this.camera.position.set(radius * 1.25, radius * 0.75, radius * 1.45);
+    }
+    this.controls.maxDistance = radius * 8;
+    this.controls.target.set(0, 0, 0);
+  }
+
+  setStars(stars) {
+    this.stars = stars;
+    this.select(null);
+    this.rebuild();
+  }
+
+  rebuild() {
+    const radius = this.radius;
+    // Release GPU buffers, and remove label elements: three.js removes a
+    // CSS2DObject's element only when that object itself is removed, not when
+    // an ancestor group is cleared.
+    this.content.traverse((o) => {
+      o.geometry?.dispose();
+      o.material?.dispose();
+      if (o.isCSS2DObject) o.element.remove();
+    });
     this.content.clear();
     const s = this.stars;
     const indices = [];
@@ -82,24 +109,30 @@ export class NeighbourhoodView {
     const colours = new Float32Array(indices.length * 3);
     const sizes = new Float32Array(indices.length);
     const v = new THREE.Vector3();
+    // With many stars, additive blending saturates; dim and shrink the points
+    // as the count grows, so that density still reads as structure.
+    const density = Math.min(1, Math.sqrt(3000 / Math.max(indices.length, 1)));
+    const dim = Math.max(0.12, density), shrink = Math.max(0.55, density ** 0.3);
     indices.forEach((i, k) => {
       toScene(this.galactic(i), v).toArray(positions, 3 * k);
       const { size, intensity } = magnitudeStyle(absoluteMagnitude(s.mag[i], s.dist[i]), 15);
-      const [r, g, b] = starRgb(s.ci[i]);
-      colours.set([r * intensity, g * intensity, b * intensity], 3 * k);
-      sizes[k] = size;
+      const [r, g, b] = starColour(s.photometry, s.ci[i]);
+      const k3 = intensity * dim;
+      colours.set([r * k3, g * k3, b * k3], 3 * k);
+      sizes[k] = size * shrink;
     });
     this.points = starPoints(positions, colours, sizes, this.renderer.getPixelRatio());
     this.content.add(this.points);
 
     // Labels: the brightest named stars, and the nearest stars whatever their names.
     this.labelGroup = new THREE.Group();
-    const named = indices.filter((i) => s.name(i)).sort((a, b) => s.mag[a] - s.mag[b])
+    const named = indices.filter((i) => s.starName(i)).sort((a, b) => s.mag[a] - s.mag[b])
       .slice(0, MAX_NAMED_LABELS);
     const nearest = [...indices].sort((a, b) => s.dist[a] - s.dist[b]).slice(0, NEAREST_LABELS);
+    const nearestSet = new Set(nearest);
     this.labelEntries = [];
     for (const i of new Set([...named, ...nearest])) {
-      const text = s.label(i);
+      const text = s.label(i) || (nearestSet.has(i) ? s.designation(i) : '');
       if (!text) continue;
       const object = label('star-label', `<span class="name">${text}</span>`, () => this.onSelect(i));
       toScene(this.galactic(i), object.position);
@@ -109,7 +142,8 @@ export class NeighbourhoodView {
     this.content.add(this.labelGroup);
 
     this.grid = new THREE.Group();
-    const material = new THREE.LineBasicMaterial({ color: 0xfbe2ee, transparent: true, opacity: 0.09 });
+    this.ringLabels = [];
+    const material = new THREE.LineBasicMaterial({ color: 0xf1e2ee, transparent: true, opacity: 0.09 });
     for (const r of RING_RADII.filter((x) => x <= radius * 1.05)) {
       const pts = [];
       for (let k = 0; k <= 160; k++) {
@@ -117,34 +151,28 @@ export class NeighbourhoodView {
         pts.push(new THREE.Vector3(r * Math.cos(a), 0, -r * Math.sin(a)));
       }
       this.grid.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), material));
-      const tag = label('grid-label', `${r} pc · ${Math.round(r * LY_PER_PC)} ly`);
+      const text = `${r.toLocaleString('en')} pc · ${Math.round(r * LY_PER_PC).toLocaleString('en')} ly`;
+      const tag = label('grid-label', text);
       tag.position.set(r * Math.cos(-2.2), 0, -r * Math.sin(-2.2));
       this.grid.add(tag);
+      this.ringLabels.push({ object: tag, text });
     }
     const reach = radius * 1.1;
     const axis = new THREE.Line(new THREE.BufferGeometry().setFromPoints(
       [new THREE.Vector3(0, 0, 0), new THREE.Vector3(reach, 0, 0)]),
-      new THREE.LineBasicMaterial({ color: 0xff7eb0, transparent: true, opacity: 0.35 }));
+      new THREE.LineBasicMaterial({ color: 0xca8dbe, transparent: true, opacity: 0.35 }));
     this.grid.add(axis);
     const centre = label('grid-label accent', '→ galactic centre');
     centre.position.set(radius * 0.8, 0, 0);
     this.grid.add(centre);
     const pole = new THREE.Line(new THREE.BufferGeometry().setFromPoints(
       [new THREE.Vector3(0, -reach * 0.5, 0), new THREE.Vector3(0, reach * 0.5, 0)]),
-      new THREE.LineBasicMaterial({ color: 0xfbe2ee, transparent: true, opacity: 0.12 }));
+      new THREE.LineBasicMaterial({ color: 0xf1e2ee, transparent: true, opacity: 0.12 }));
     this.grid.add(pole);
     const north = label('grid-label', 'north galactic pole');
     north.position.set(0, reach * 0.5, 0);
     this.grid.add(north);
     this.content.add(this.grid);
-
-    if (previous) {
-      this.camera.position.multiplyScalar(radius / previous);
-    } else {
-      this.camera.position.set(radius * 1.25, radius * 0.75, radius * 1.45);
-    }
-    this.controls.maxDistance = radius * 8;
-    this.controls.target.set(0, 0, 0);
   }
 
   setOptions(options) {
@@ -177,6 +205,7 @@ export class NeighbourhoodView {
         object: e.object, text: e.text,
         wanted: this.options.labels || e.i === this.selected, always: e.i === this.selected,
       })),
+      ...this.ringLabels.map((e) => ({ object: e.object, text: e.text, wanted: this.options.grid })),
     ], this.camera, this.width, this.height);
   }
 
@@ -199,7 +228,7 @@ export class NeighbourhoodView {
   }
 
   legend() {
-    return `${this.indices.length.toLocaleString('en')} stars within ${this.radius} pc `
-      + `(${Math.round(this.radius * LY_PER_PC)} light-years), from Hipparcos parallaxes`;
+    return `${this.indices.length.toLocaleString('en')} stars within ${this.radius.toLocaleString('en')} pc `
+      + `(${Math.round(this.radius * LY_PER_PC).toLocaleString('en')} light-years) · ${this.stars.title}`;
   }
 }

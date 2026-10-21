@@ -89,7 +89,7 @@ export class SolarSystemView {
   }
 
   buildLights() {
-    this.scene.add(new THREE.AmbientLight(0xffe8f2, 0.07));
+    this.scene.add(new THREE.AmbientLight(0xf6eaf4, 0.07));
     const sunlight = new THREE.PointLight(0xfff1dc, 2.8, 0, 0);
     this.scene.add(sunlight);
   }
@@ -156,7 +156,7 @@ export class SolarSystemView {
 
   buildGrid() {
     this.grid = new THREE.Group();
-    const material = new THREE.LineBasicMaterial({ color: 0xfbe2ee, transparent: true, opacity: 0.075 });
+    const material = new THREE.LineBasicMaterial({ color: 0xf1e2ee, transparent: true, opacity: 0.075 });
     for (const r of GRID_RADII) {
       const points = [];
       for (let k = 0; k <= 192; k++) {
@@ -172,7 +172,7 @@ export class SolarSystemView {
     }
     const equinox = new THREE.Line(
       new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(60, 0, 0)]),
-      new THREE.LineBasicMaterial({ color: 0xff7eb0, transparent: true, opacity: 0.28 }));
+      new THREE.LineBasicMaterial({ color: 0xca8dbe, transparent: true, opacity: 0.28 }));
     this.grid.add(equinox);
     const mark = sceneLabel('grid-label accent', '♈︎ equinox');
     mark.object.position.set(1.15, 0, 0);
@@ -211,7 +211,7 @@ export class SolarSystemView {
     const lineGeometry = new THREE.BufferGeometry();
     lineGeometry.setAttribute('position', new THREE.BufferAttribute(linePositions, 3));
     this.constellationLines = new THREE.LineSegments(lineGeometry,
-      new THREE.LineBasicMaterial({ color: 0xf5b8d2, transparent: true, opacity: 0.16, depthWrite: false }));
+      new THREE.LineBasicMaterial({ color: 0xd9b3d0, transparent: true, opacity: 0.16, depthWrite: false }));
     this.constellationLines.frustumCulled = false;
     this.sky.add(this.constellationLines);
     this.scene.add(this.sky);

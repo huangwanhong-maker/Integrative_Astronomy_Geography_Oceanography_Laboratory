@@ -99,6 +99,15 @@ export const ICRS_TO_GALACTIC = [
   -0.8676661490190047, -0.1980763734312015, +0.4559837761750669,
 ];
 
+// Galactic to supergalactic coordinates (de Vaucouleurs, de Vaucouleurs and
+// Corwin 1976): the north supergalactic pole lies at galactic (l, b) =
+// (47.37°, +6.32°), and supergalactic longitude is zero at (137.37°, 0°).
+// The two directions are orthogonal, so the rows below are orthonormal.
+const SG_POLE = fromSpherical(47.37 * DEG, 6.32 * DEG);
+const SG_ORIGIN = fromSpherical(137.37 * DEG, 0);
+export const GALACTIC_TO_SUPERGALACTIC = [...SG_ORIGIN, ...cross(SG_POLE, SG_ORIGIN), ...SG_POLE];
+export const ICRS_TO_SUPERGALACTIC = multiply(GALACTIC_TO_SUPERGALACTIC, ICRS_TO_GALACTIC);
+
 // ---- precession -----------------------------------------------------------
 
 // Precession from J2000 to the mean equator and equinox of date (IAU 1976).
