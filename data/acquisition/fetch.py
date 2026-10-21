@@ -396,6 +396,30 @@ def acquire_griddap(manifest: dict, profile: str | None, overrides: dict, refres
     return True
 
 
+def followed(folder: Path, rule: dict) -> list[dict]:
+    """Requests named by the items of a JSON file already fetched.
+
+    rule: {"from": file, "items": key of the list in it, "where": {dotted path:
+    value}, "url": template, "file": template}; templates index an item as
+    str.format does, as in "{properties[url][geometry]}".
+    """
+    data = load(folder / rule["from"])
+    out = []
+    for item in data.get(rule["items"], []):
+        def get(path, node=item):
+            for key in path.split("."):
+                node = node.get(key) if isinstance(node, dict) else None
+            return node
+        if all(get(k) == v for k, v in rule.get("where", {}).items()):
+            url, file = rule["url"].format(**item), rule["file"].format(**item)
+            # Names come from fetched content: keep them in the folder, and the requests secure.
+            if Path(file).name != file or file.startswith(".") or not url.startswith("https://"):
+                print(f"  linked request refused: {url} -> {file}")
+                continue
+            out.append({"url": url, "file": file})
+    return out
+
+
 def acquire_http(manifest: dict, profile: str | None, overrides: dict, refresh: bool) -> bool:
     values, tag = resolve(manifest, profile, overrides)
     folder = CACHE / manifest["id"] / tag
@@ -421,6 +445,13 @@ def acquire_http(manifest: dict, profile: str | None, overrides: dict, refresh: 
         except (urllib.error.URLError, OSError) as error:
             print(f"  REQUEST FAILED: {r['url']}: {error}")
             return False
+    for rule in manifest.get("follow", []):
+        for r in followed(folder, rule):
+            try:
+                download(r["url"], folder / r["file"], timeout=300, attempts=2)
+                requests.append(r)
+            except (urllib.error.URLError, OSError) as error:
+                print(f"  linked request failed, skipped: {r['url']}: {error}")
     write_provenance(folder, manifest, tag, values, resolved, requests, started)
     total = sum((folder / r["file"]).stat().st_size for r in requests)
     print(f"  {len(requests)} file(s), {total / 1e6:.2f} MB in {folder.relative_to(DATA.parent)}")

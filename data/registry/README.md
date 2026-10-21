@@ -12,10 +12,10 @@ Manifests are read by [`../acquisition/fetch.py`](../acquisition/fetch.py). It d
 
 | Kind | Meaning | Example |
 |---|---|---|
-| `files` | Fixed files, downloaded as they are, or taken from a zip archive on the web. Each file's SHA-256 is recorded in the manifest and verified on every retrieval. | `jpl-de440s`, `natural-earth-50m`, `solar-system-maps`, `koppen-geiger` |
+| `files` | Fixed files, downloaded as they are, or taken from a zip archive on the web. Each file's SHA-256 is recorded in the manifest and verified on every retrieval. | `jpl-de440s`, `natural-earth-50m`, `solar-system-maps`, `koppen-geiger`, `pangu-weather` |
 | `tap` | A query to an astronomical archive through the IVOA Table Access Protocol | `gaia-dr3`, `ungc`, `tully-2mass-groups` |
 | `griddap` | A subset of a gridded dataset served by ERDDAP: which variables, which times, how fine a grid | `gfs`, `oisst`, `ww3`, `etopo-2022` |
-| `http` | One or more web requests built from URL templates | `worldbank-indicators`, `usgs-earthquakes`, `gibs-daily`, `gibs-static`, `gibs-relief` |
+| `http` | One or more web requests built from URL templates, and optionally those the results link to | `worldbank-indicators`, `usgs-earthquakes`, `gibs-daily`, `gibs-static`, `gibs-relief`, `gfs-analysis-0p25`, `gdacs` |
 | `ncss` | Groups of variables of a forecast model's collection on a THREDDS server, by its NetCDF Subset Service: levels, times and grid spacing | `gfs-levels`, `aigfs`, `aigefs` |
 | `opendap` | One variable from each of several datasets on an OPeNDAP (DAP2) server, every n-th point of the grid, saved as netCDF classic | `terraclimate-normals` |
 
@@ -26,7 +26,7 @@ All kinds except `files` declare parameters and profiles, so that a user chooses
 | Field | Meaning |
 |---|---|
 | `id` | Identifier; also the name of the cache folder |
-| `kind` | `files` (the default), `tap`, `griddap`, `http` or `ncss` |
+| `kind` | `files` (the default), `tap`, `griddap`, `http`, `ncss` or `opendap` |
 | `domain` | The field the data belong to: `astronomy`, `geography`, `oceanography`, `meteorology`, `geophysics`, `climate`. Applications group data by it. |
 | `title`, `provider` | What the dataset is and who produced it |
 | `credit` | A short attribution, shown on maps |
@@ -63,6 +63,8 @@ The anchors mean:
 - `today` is 00:00 UTC;
 - `last` is the dataset's last time (`griddap` only).
 
+A `time` parameter may also carry `align_hours`: the resolved instant is then moved down to a multiple of that many hours from 00:00 UTC, as a forecast's cycle is (00, 06, 12, 18 UTC for 6).
+
 The resolved instants are recorded in the provenance.
 
 **Cache folders.** Results go to `data/cache/<id>/<profile>/`. When parameters are overridden, they go to `data/cache/<id>/custom-<hash>/`, named by a hash of the values.
@@ -93,6 +95,17 @@ The resolved instants are recorded in the provenance.
 ## 7. Fields of `http` Datasets
 
 `requests` is a list of `{url, file}`. Each URL is a template with `{parameter}` placeholders. A `time` parameter may carry a format, as in `{start:%Y-%m-%dT%H:%M:%S}`.
+
+`follow` is an optional list of rules for requests that the results name, fetched after `requests`:
+
+| Field | Meaning |
+|---|---|
+| `from` | A JSON file already fetched |
+| `items` | The key of the list in it, such as `features` |
+| `where` | Fields an item must have, by dotted paths, such as `{"properties.eventtype": "TC"}` |
+| `url`, `file` | Templates over the item, indexed as Python's `str.format` does, such as `{properties[url][geometry]}` |
+
+The names come from fetched content. A file name that would leave the dataset's folder, and a URL that is not HTTPS, are refused. A linked request that fails is skipped and the retrieval continues.
 
 ## 8. Fields of `ncss` Datasets
 
