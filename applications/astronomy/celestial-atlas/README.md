@@ -1,13 +1,13 @@
 # Celestial Atlas
 
-*Status: draft (2026-10-22). Kind: tool. Field: astronomy.* Decision records: [ADR 0011](../../../development/decisions/0011-first-application-celestial-atlas.md), [ADR 0013](../../../development/decisions/0013-galaxies-and-their-relations.md).
+*Status: draft (2026-10-22). Kind: tool. Field: astronomy.* Decision records: [ADR 0011](../../../development/decisions/0011-first-application-celestial-atlas.md), [ADR 0013](../../../development/decisions/0013-galaxies-and-their-relations.md), [ADR 0016](../../../development/decisions/0016-maps-of-bodies-and-iau-rotation.md).
 
 The Celestial Atlas shows the Sun, Moon, planets, stars and galaxies, at any instant from 1849 to 2150 or live. It is organised as five views, from the Solar System out to the cosmic web.
 
 | View | What it shows |
 |---|---|
-| Solar System | A 3D heliocentric view in the ecliptic frame of J2000, with DE440 positions and osculating orbits. Bodies can be enlarged by a stated factor. |
-| Neighbourhood | Stars in 3D at their measured distances, in galactic coordinates, from a chosen catalogue: HYG (Hipparcos) or any fetched Gaia DR3 subset. The radius ranges from 5 to 5000 pc. |
+| Solar System | A 3D heliocentric view in the ecliptic frame of J2000, with DE440 positions and osculating orbits. Bodies carry maps of their surfaces, turned to their orientation at the instant shown; the Earth shows its city lights at night; the Milky Way lies behind the stars. Bodies can be enlarged by a stated factor. |
+| Neighbourhood | Stars in 3D at their measured distances, in galactic coordinates, from a chosen catalogue: HYG (Hipparcos) or any fetched Gaia DR3 subset, against the Milky Way as seen from the Sun. The radius ranges from 5 to 5000 pc. |
 | Galaxies | Galaxies and the relations between them, in supergalactic coordinates:<ul><li>**Local Volume** (UNGC): each galaxy is linked to its main disturber, with tidal groups and a Hubble-flow diagram.</li><li>**Local Universe** (2MRS groups): galaxies are linked to their group centres, with named clusters and a mass–light diagram.</li></ul> |
 | Sky Chart | The sky for any place and time, drawn as a star atlas, with constellations named in Latin, English, Chinese or Japanese, the Moon in its phase, and the planets |
 | Orbits | The planets seen from the north ecliptic pole, with lines of sight and their configuration |
@@ -24,6 +24,8 @@ python data/products/star_catalog.py --source gaia-dr3 --profile small
 python data/acquisition/fetch.py ungc tully-2mass-groups            # galaxies
 python data/products/galaxy_catalog.py --source ungc
 python data/products/galaxy_catalog.py --source tully-2mass-groups  # names from SIMBAD, cached
+python data/acquisition/fetch.py solar-system-maps                  # optional: maps of the bodies and the sky
+python data/products/body_maps.py
 python applications/astronomy/celestial-atlas/serve.py --open
 ```
 
@@ -41,6 +43,8 @@ To choose which part of a catalogue to fetch, and how much of it, see `python da
 | Local Volume galaxies | Updated Nearby Galaxy Catalog (Karachentsev et al. 2013), CDS VizieR | Published catalogue; cite |
 | Galaxy groups | Tully (2015), from the 2MASS Redshift Survey (Huchra et al. 2012), CDS VizieR | Published catalogue; cite |
 | Galaxy and cluster names | SIMBAD (CDS), resolved at build time | Cite SIMBAD |
+| Maps of the Sun, the Moon, the planets, Saturn's rings and the Milky Way | Solar System Scope (INOVE), from NASA, JPL and ESA mission data | CC BY 4.0 |
+| The Earth by day and by night | Blue Marble and Black Marble (NASA), via GIBS; shared with the Earth Atlas | NASA; acknowledge |
 
 ## 3. Method
 
@@ -54,6 +58,8 @@ To choose which part of a catalogue to fetch, and how much of it, see `python da
   - **Applied:** light-time, IAU 1976 precession, GMST (IAU 2006), topocentric parallax and refraction.
   - **Not applied:** aberration, nutation and deflection, which together amount to under 1′.
 - **Orbits.** Osculating two-body conics, computed from state vectors.
+- **Orientation of the bodies.** The IAU rotation models (Archinal et al. 2018) give each body's pole (α₀, δ₀) and prime meridian W in the ICRF, including the Moon's periodic terms and those of Mercury and Mars. The rotation to body-fixed axes is B = R_z(W) R_x(90° − δ₀) R_z(90° + α₀).
+- **Maps.** A body's map is in east longitude with 0 at its centre; the textured sphere's local axes are related to body-fixed ones by (x, y, z)_body = (x, −z, y)_local. The Milky Way map is in galactic coordinates; its orientation was checked against twelve bright stars when it was built. The Earth's night lights show where the Sun is below the horizon.
 - **Galaxies.** The theory is in [theory/astronomy/galaxy-relations.md](../../../theory/astronomy/galaxy-relations.md).
   - Positions use supergalactic coordinates.
   - The tidal index Θ₁ = max log(M/D³) − 10.96 is recomputed, along with each galaxy's main disturber.
@@ -68,7 +74,7 @@ To choose which part of a catalogue to fetch, and how much of it, see `python da
 node applications/astronomy/celestial-atlas/tests/run-tests.mjs
 ```
 
-There are 47 checks.
+There are 57 checks.
 
 | Quantity | Reference | Agreement |
 |---|---|---|
@@ -78,6 +84,7 @@ There are 47 checks.
 | Supergalactic directions, 43 036 galaxies | Tully (2015) | Median 0.00012°, maximum 0.0096° (one listed anomaly) |
 | Main disturbers, 770 galaxies | Karachentsev et al. (2013) | 99.2 % identical |
 | Tidal index Θ₁ | Karachentsev et al. (2013) | Median difference 0.027 dex |
+| Sub-Earth points of the Sun, the Moon and the planets, 2000–2036 | JPL Horizons | Within 0.011° (Mercury); the others within 0.003° |
 
 ## 5. Structure
 
@@ -91,8 +98,9 @@ The computation in `src/core/` is a provisional stand-in for the laboratory's C+
 | `src/core/sky.js` | Apparent places, elongation, phase | `core/domains/astronomy` |
 | `src/core/kepler.js` | Osculating orbits | physis (mechanics) |
 | `src/core/galaxies.js` | Tidal index, main disturbers, inferred masses, tidal groups | `core/domains/astronomy` |
+| `src/core/rotation.js` | IAU rotation models of the Sun, the Moon and the planets | `core/domains/astronomy` |
 | `src/data/catalog.js` | Loads products: stars, constellations, galaxies | — |
-| `src/render/` | Palette, star points, label placement | `visualization/` |
+| `src/render/` | Palette, star points, label placement, maps of the bodies and the sky | `visualization/` |
 | `src/views/` | The five views and the galaxy diagrams | `visualization/renderers` |
 
 ## 6. Limits
@@ -100,4 +108,6 @@ The computation in `src/core/` is a provisional stand-in for the laboratory's C+
 - UT1 − UTC and future leap seconds are not modelled.
 - Star positions are drawn at their catalogue epoch, without proper motion.
 - Gaia subsets taken brightest-first are limited by magnitude, not complete within a distance.
-- The browser loads the 32 MB DE440 kernel.
+- The browser loads the 32 MB DE440 kernel, and about 17 MB of maps after the first frame.
+- The maps are global images at 4096 pixels (the sky at 8192); they do not show finer detail at close range.
+- The Earth's day map is the Blue Marble, a cloud-free composite, not the Earth on the day shown.

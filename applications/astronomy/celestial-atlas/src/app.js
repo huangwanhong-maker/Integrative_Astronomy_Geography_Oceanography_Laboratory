@@ -8,6 +8,7 @@ import { BODIES, BY_KEY, PLANETS, orbitalMu } from './core/bodies.js';
 import { snapshot } from './core/sky.js';
 import { osculating } from './core/kepler.js';
 import { loadStars, loadConstellations, listStarCatalogues } from './data/catalog.js';
+import { loadMaps } from './render/maps.js';
 import { SolarSystemView } from './views/solar-system.js';
 import { NeighbourhoodView, LY_PER_PC, absoluteMagnitude } from './views/neighbourhood.js';
 import { SkyChartView } from './views/sky-chart.js';
@@ -73,8 +74,8 @@ const state = {
     galaxies: { kind: 'galaxy', index: null },
   },
   options: {
-    solar: { size: 5, orbits: true, labels: true, stars: true, constellations: false, grid: true },
-    near: { catalogue: 'stars-v1', radius: 2, labels: true, grid: true },
+    solar: { size: 5, orbits: true, labels: true, stars: true, milkyWay: true, constellations: false, grid: true },
+    near: { catalogue: 'stars-v1', radius: 2, labels: true, grid: true, milkyWay: true },
     sky: { magLimit: 5.5, lines: true, names: true, nameLang: 'la', ecliptic: true, grid: true,
       refraction: true, starNames: true },
     orbits: { range: 'inner', sightLines: true },
@@ -305,6 +306,13 @@ async function main() {
     hubble: new HubbleDiagram($('#chart')),
     massLight: new MassLightDiagram($('#chart')),
   };
+  // Maps of the bodies and the sky arrive after the first frame; they are optional.
+  loadMaps(DATA, renderer).then((maps) => {
+    if (!maps) return;
+    views.solar.setMaps(maps);
+    if (maps.sky) views.near.setSky(maps.sky);
+    dirty = true;
+  });
   const galaxyMap = () => state.options.galaxies.mode === 'map';
   const is3d = (v) => v === 'solar' || v === 'near' || (v === 'galaxies' && galaxyMap());
   // The view object that draws the current tab.
@@ -320,9 +328,9 @@ async function main() {
   function applyOptions() {
     const o = state.options;
     views.solar.setOptions({ sizeScale: SIZE_STEPS[o.solar.size], orbits: o.solar.orbits, labels: o.solar.labels,
-      stars: o.solar.stars, constellations: o.solar.constellations, grid: o.solar.grid });
+      stars: o.solar.stars, milkyWay: o.solar.milkyWay, constellations: o.solar.constellations, grid: o.solar.grid });
     if (views.near.radius !== RADIUS_STEPS[o.near.radius]) views.near.setRadius(RADIUS_STEPS[o.near.radius]);
-    views.near.setOptions({ labels: o.near.labels, grid: o.near.grid });
+    views.near.setOptions({ labels: o.near.labels, grid: o.near.grid, milkyWay: o.near.milkyWay });
     if (views.near.stars.name !== o.near.catalogue) useCatalogue(o.near.catalogue);
     views.sky.setOptions(o.sky);
     views.orbits.setOptions(o.orbits);
@@ -444,7 +452,7 @@ async function main() {
           <input type="range" min="0" max="${SIZE_STEPS.length - 1}" step="1" value="${o.size}" data-view-option="solar" data-key="size"></label>
         <p class="legend" id="legend"></p>
         ${check('solar', 'orbits', 'Orbits')}${check('solar', 'labels', 'Names')}
-        ${check('solar', 'grid', 'Distance rings')}${check('solar', 'stars', 'Stars')}
+        ${check('solar', 'grid', 'Distance rings')}${check('solar', 'stars', 'Stars')}${check('solar', 'milkyWay', 'Milky Way')}
         ${check('solar', 'constellations', 'Constellation figures')}
         <h3>Go to</h3>
         <div class="chips">${BODIES.map((b) => `<button type="button" data-focus="${b.key}">`
@@ -459,7 +467,7 @@ async function main() {
         <label class="range"><span>Radius</span>
           <input type="range" min="0" max="${RADIUS_STEPS.length - 1}" step="1" value="${o.radius}" data-view-option="near" data-key="radius"></label>
         <p class="legend" id="legend"></p>
-        ${check('near', 'labels', 'Names')}${check('near', 'grid', 'Rings and axes')}`;
+        ${check('near', 'labels', 'Names')}${check('near', 'grid', 'Rings and axes')}${check('near', 'milkyWay', 'Milky Way')}`;
     } else if (v === 'sky') {
       const custom = !PLACES.some((p) => p.name === state.place.name);
       html = `<h3>Observer</h3>

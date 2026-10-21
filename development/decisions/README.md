@@ -26,6 +26,7 @@ Decisions that concern only one library are recorded in that library's own `deve
 | [0013](0013-galaxies-and-their-relations.md) | Galaxies and their relations in the Celestial Atlas | Accepted |
 | [0014](0014-earth-atlas-separated-data-and-typed-layers.md) | The Earth Atlas: separated data and typed layers | Accepted, provisionally; amended by 0015 |
 | [0015](0015-earth-atlas-models-imagery-detail.md) | Forecast models, a laboratory model, imagery and detail in the Earth Atlas | Accepted, provisionally |
+| [0016](0016-maps-of-bodies-and-iau-rotation.md) | Maps of the bodies, IAU rotation, and imagery shared across applications | Accepted, provisionally |
 
 ## 2. Template
 

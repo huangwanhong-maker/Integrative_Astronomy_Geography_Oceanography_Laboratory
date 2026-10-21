@@ -12,7 +12,7 @@ Manifests are read by [`../acquisition/fetch.py`](../acquisition/fetch.py). It d
 
 | Kind | Meaning | Example |
 |---|---|---|
-| `files` | Fixed files, downloaded as they are. Each file's SHA-256 is recorded in the manifest and verified on every retrieval. | `jpl-de440s`, `natural-earth-50m` |
+| `files` | Fixed files, downloaded as they are. Each file's SHA-256 is recorded in the manifest and verified on every retrieval. | `jpl-de440s`, `natural-earth-50m`, `solar-system-maps` |
 | `tap` | A query to an astronomical archive through the IVOA Table Access Protocol | `gaia-dr3`, `ungc`, `tully-2mass-groups` |
 | `griddap` | A subset of a gridded dataset served by ERDDAP: which variables, which times, how fine a grid | `gfs`, `oisst`, `ww3`, `etopo-2022` |
 | `http` | One or more web requests built from URL templates | `worldbank-indicators`, `usgs-earthquakes`, `gibs-daily`, `gibs-static` |
@@ -36,7 +36,7 @@ All kinds except `files` declare parameters and profiles, so that a user chooses
 
 ## 3. Fields of `files` Datasets
 
-`files` is a list of `{url, file, size, sha256}`. A `null` checksum marks a file never verified; run `fetch.py --record` once to record it. Prefer URLs pinned to a release (for example a git tag), so that checksums stay valid.
+`files` is a list of `{url, file, size, sha256}`. A `null` checksum marks a file never verified; run `fetch.py --record` once to record it. Prefer URLs pinned to a release (for example a git tag), so that checksums stay valid. A file may carry further fields that its product builder reads; for example, `solar-system-maps` names the `body` each map shows.
 
 ## 4. Parameters and Profiles
 

@@ -13,6 +13,7 @@ import {
   horizontal, sub, norm, dot, cross,
 } from '../src/core/frames.js';
 import { osculating } from '../src/core/kepler.js';
+import { bodyFixedMatrix } from '../src/core/rotation.js';
 import { GM_SUN } from '../src/core/bodies.js';
 import { ICRS_TO_SUPERGALACTIC } from '../src/core/frames.js';
 import {
@@ -104,6 +105,30 @@ check('Delta T in 1950 near 29.07 s', deltaTBefore1972(1950) - 29.07, 1e-9, 's')
   const o = osculating(sub(emb.p, sun.p), sub(emb.v, sun.v), GM_SUN + 403503.235502);
   check('EMB semi-major axis near 1.0000 AU', o.a / AU_KM - 1.0000, 0.0005, 'AU');
   check('EMB eccentricity near 0.0167', o.e - 0.0167, 0.0005, '');
+}
+
+// 7. Orientation of the bodies (IAU rotation models, Archinal et al. 2018) against the
+//    sub-Earth points of JPL Horizons, 2000-2035: longitude of the prime meridian and
+//    direction of the pole. Horizons gives planetodetic latitudes; ours are converted.
+{
+  const orientation = JSON.parse(readFileSync(resolve(here, 'fixtures/orientation.json'), 'utf8')).entries;
+  const NAIF = { sun: 10, mercury: 199, venus: 299, moon: 301, mars: 4, jupiter: 5, saturn: 6, uranus: 7, neptune: 8, pluto: 9 };
+  const FLATTENING = { mars: 0.00589, jupiter: 0.06487, saturn: 0.09796, uranus: 0.02293, neptune: 0.01708 };
+  const worst = {};
+  for (const e of orientation) {
+    const et = etOf(e.jd_tt);
+    const earth = spk.stateSSB(399, et).p;
+    let tau = 0, g;
+    for (let i = 0; i < 3; i++) { g = sub(earth, spk.stateSSB(NAIF[e.body], et - tau).p); tau = norm(g) / LIGHT_KM_S; }
+    const v = apply(bodyFixedMatrix(e.body, e.jd_tt - tau / 86400), g);
+    let lon = Math.atan2(v[1], v[0]) / DEG;
+    if (e.west_positive) lon = -lon;
+    const f = FLATTENING[e.body] || 0;
+    const lat = Math.atan(Math.tan(Math.asin(v[2] / norm(v))) / (1 - f) ** 2) / DEG;
+    const dl = Math.abs(((lon - e.lon_deg + 540) % 360) - 180), db = Math.abs(lat - e.lat_deg);
+    worst[e.body] = Math.max(worst[e.body] || 0, dl, db);
+  }
+  for (const [body, w] of Object.entries(worst)) check(`sub-Earth point of ${body} vs Horizons (IAU rotation)`, w, 0.02, 'deg');
 }
 
 // ---- galaxies (need data/cache from data/acquisition/fetch.py) ----

@@ -4,12 +4,19 @@
 // visible (the factor is shown to the user); the Moon's distance from the Earth
 // is then exaggerated by a smaller factor so that it does not sit inside the
 // enlarged Earth. At a size factor of 1 everything is to scale.
+//
+// Bodies carry maps of their surfaces (or cloud tops), turned by the IAU
+// rotation models (src/core/rotation.js) to their orientation at the instant
+// shown; the Earth shows its lights on the night side; the sky behind the stars
+// is the Milky Way.
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { BODIES, BY_KEY } from '../core/bodies.js';
-import { AU_KM, DEG, ICRS_TO_ECLIPTIC, apply, fromSpherical, sub } from '../core/frames.js';
+import { AU_KM, ICRS_TO_ECLIPTIC, ICRS_TO_GALACTIC, apply, multiply, transpose, sub } from '../core/frames.js';
+import { bodyFixedMatrix } from '../core/rotation.js';
+import { BODY_FROM_LOCAL, quaternionOf, skyRotation, skySphere, nightLights } from '../render/maps.js';
 import { osculatingOrbit } from '../core/sky.js';
 import { starPoints, magnitudeStyle } from '../render/points.js';
 import { starRgb } from '../render/colour.js';
@@ -26,6 +33,8 @@ const LABEL_PRIORITY = ['sun', 'jupiter', 'saturn', 'earth', 'venus', 'mars', 'm
 
 // Ecliptic (x to the equinox, z to the north ecliptic pole) to scene (y up).
 const toScene = (e, out = new THREE.Vector3()) => out.set(e[0], e[2], -e[1]);
+const SCENE_FROM_ECLIPTIC = [1, 0, 0, 0, 0, 1, 0, -1, 0];
+const SCENE_FROM_ICRS = multiply(SCENE_FROM_ECLIPTIC, ICRS_TO_ECLIPTIC);
 const icrsToEclipticAu = (v) => {
   const e = apply(ICRS_TO_ECLIPTIC, v);
   return [e[0] / AU_KM, e[1] / AU_KM, e[2] / AU_KM];
@@ -73,7 +82,7 @@ export class SolarSystemView {
     this.labels.domElement.className = 'label-layer';
     container.appendChild(this.labels.domElement);
 
-    this.options = { sizeScale: 600, orbits: true, labels: true, stars: true, constellations: false, grid: true };
+    this.options = { sizeScale: 600, orbits: true, labels: true, stars: true, constellations: false, grid: true, milkyWay: true };
     this.items = {};
     this.focusKey = null;
     this.selectedKey = null;
@@ -138,6 +147,7 @@ export class SolarSystemView {
 
   makeRings(b) {
     const inner = b.rings.inner / b.radius, outer = b.rings.outer / b.radius;
+    this.ringRadii = [inner, outer];
     // Radial bands of Saturn's C, B and A rings and the Cassini division (km).
     const f = (km) => km / b.rings.outer;
     const texture = radialTexture([
@@ -147,10 +157,15 @@ export class SolarSystemView {
       [f(122300), 'rgba(222,203,168,0.6)'], [f(136000), 'rgba(210,192,160,0.5)'],
       [1, 'rgba(210,192,160,0)'],
     ], 512);
-    const ring = new THREE.Mesh(new THREE.RingGeometry(inner, outer, 160, 1),
+    const geometry = new THREE.RingGeometry(inner, outer, 192, 1);
+    // Texture coordinates by radius, for a radial map of the rings.
+    const pos = geometry.attributes.position, uv = geometry.attributes.uv;
+    for (let i = 0; i < pos.count; i++) uv.setXY(i, (Math.hypot(pos.getX(i), pos.getY(i)) - inner) / (outer - inner), 0.5);
+    const ring = new THREE.Mesh(geometry,
       new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide, depthWrite: false }));
-    const pole = toScene(apply(ICRS_TO_ECLIPTIC, fromSpherical(b.pole[0] * DEG, b.pole[1] * DEG)));
-    ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), pole.normalize());
+    // In the planet's equatorial plane (the body's local x-z plane).
+    ring.rotation.x = -Math.PI / 2;
+    this.ring = ring;
     return ring;
   }
 
@@ -215,6 +230,36 @@ export class SolarSystemView {
     this.constellationLines.frustumCulled = false;
     this.sky.add(this.constellationLines);
     this.scene.add(this.sky);
+  }
+
+  // Maps from src/render/maps.js: surfaces, Saturn's rings, the Earth by day and night, the sky.
+  setMaps(maps) {
+    if (!maps) return;
+    for (const [key, item] of Object.entries(this.items)) {
+      const texture = key === 'earth' ? maps.earthDay || maps.bodies.earth : maps.bodies[key];
+      if (!texture) continue;
+      const m = item.mesh.material;
+      m.map = texture;
+      m.color.set(key === 'sun' ? '#fff3e0' : '#ffffff');
+      if (key === 'earth' && maps.earthNight) {
+        m.emissiveMap = maps.earthNight;
+        m.emissive = new THREE.Color(1.0, 0.82, 0.58);
+        m.emissiveIntensity = 1.25;
+        nightLights(m);
+        this.earthMaterial = m;
+      }
+      m.needsUpdate = true;
+    }
+    if (maps.rings && this.ring) {
+      this.ring.material.map = maps.rings;
+      this.ring.material.needsUpdate = true;
+    }
+    if (maps.sky) {
+      this.milkyWay = skySphere(maps.sky, SKY_RADIUS * 1.02, 0.8);
+      this.milkyWay.quaternion.copy(skyRotation(multiply(SCENE_FROM_ICRS, transpose(ICRS_TO_GALACTIC))));
+      this.sky.add(this.milkyWay);
+    }
+    this.mapped = true;
   }
 
   setOptions(options) {
@@ -282,11 +327,15 @@ export class SolarSystemView {
 
   update(snap, dt) {
     const pos = new THREE.Vector3();
+    const jdTdb = 2451545.0 + snap.et / 86400;
     for (const b of BODIES) {
       const item = this.items[b.key];
       this.bodyPosition(snap, b.key, pos);
       item.group.position.copy(pos);
       item.mesh.scale.setScalar(this.displayRadius(b.key));
+      // The body's orientation: local -> body-fixed -> ICRF -> scene.
+      const B = bodyFixedMatrix(b.key, jdTdb);
+      if (B) quaternionOf(multiply(SCENE_FROM_ICRS, multiply(transpose(B), BODY_FROM_LOCAL)), item.mesh.quaternion);
       if (item.orbit) {
         item.orbit.visible = this.options.orbits;
         if (b.parent) item.orbit.position.copy(this.items[b.parent].group.position);
@@ -297,6 +346,7 @@ export class SolarSystemView {
 
     this.grid.visible = this.options.grid;
     this.starPoints.visible = this.options.stars;
+    if (this.milkyWay) this.milkyWay.visible = this.options.stars && this.options.milkyWay;
     this.constellationLines.visible = this.options.stars && this.options.constellations;
 
     if (this.focusKey) {
@@ -344,6 +394,11 @@ export class SolarSystemView {
   }
 
   render() {
+    if (this.earthMaterial) {
+      // The direction of the Sun from the Earth, in view space, for the lights at night.
+      const earth = this.items.earth.group.position, sun = this.items.sun.group.position;
+      this.earthMaterial.userData.sunView.value.copy(sun).sub(earth).normalize().transformDirection(this.camera.matrixWorldInverse);
+    }
     this.renderer.render(this.scene, this.camera);
     this.labels.render(this.scene, this.camera);
   }

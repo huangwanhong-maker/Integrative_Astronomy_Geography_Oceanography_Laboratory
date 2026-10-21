@@ -10,6 +10,7 @@ import { ICRS_TO_GALACTIC, apply } from '../core/frames.js';
 import { starPoints, magnitudeStyle } from '../render/points.js';
 import { starColour } from '../render/colour.js';
 import { declutter } from '../render/declutter.js';
+import { skyRotation, skySphere } from '../render/maps.js';
 
 export const LY_PER_PC = 3.261563777;
 const RING_RADII = [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000];
@@ -17,6 +18,7 @@ const MAX_NAMED_LABELS = 32;
 const NEAREST_LABELS = 6;
 
 const toScene = (g, out = new THREE.Vector3()) => out.set(g[0], g[2], -g[1]);
+const SCENE_FROM_GALACTIC = [1, 0, 0, 0, 0, 1, 0, -1, 0];
 
 function label(className, html, onClick) {
   const el = document.createElement(onClick ? 'button' : 'div');
@@ -195,8 +197,20 @@ export class NeighbourhoodView {
     return this.indices[hits[0].index];
   }
 
+  // The Milky Way behind the stars, as seen from the Sun.
+  setSky(texture) {
+    if (!texture || this.skyMesh) return;
+    this.skyMesh = skySphere(texture, 8e4, 0.7);
+    this.skyMesh.quaternion.copy(skyRotation(SCENE_FROM_GALACTIC));
+    this.scene.add(this.skyMesh);
+  }
+
   update() {
     this.grid.visible = this.options.grid;
+    if (this.skyMesh) {
+      this.skyMesh.position.copy(this.camera.position);
+      this.skyMesh.visible = this.options.milkyWay !== false;
+    }
     this.controls.update();
     this.scene.updateMatrixWorld();
     declutter([

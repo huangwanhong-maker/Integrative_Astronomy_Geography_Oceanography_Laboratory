@@ -42,6 +42,7 @@ python data/products/star_catalog.py                             # build product
 python data/products/field_grid.py --source gfs
 python data/acquisition/fetch.py gfs-levels aigfs                # forecast models aloft (THREDDS)
 python data/products/imagery.py --source gibs-daily             # yesterday's Earth from space
+python data/products/body_maps.py                                # maps of the planets and the sky
 ```
 
 The cache, `data/cache/`, is not under version control.
@@ -58,7 +59,7 @@ Products are written to `data/cache/products/` and listed by kind in `index.json
 | `fields` | `field_grid.py` | Variables on a regular longitude–latitude grid, over time: forecasts, analyses, relief, or our own netCDF files. Rows run north to south; global grids start at 180° W; values in their source units. | `.bin` (int16, a linear scale per variable) and `.json` (grid, times, CF metadata, statistics) |
 | `indicators` | `country_indicators.py` | A value per economy and year, keyed by World Bank codes with ISO alpha-2; aggregates kept apart | `.json` |
 | `events` | `event_catalog.py` | Events at a place and an instant: time, longitude, latitude, depth, magnitude | `.json` |
-| `imagery` | `imagery.py` | Images of the whole Earth, equirectangular: true colour of a day (gaps filled from the day before), the Blue Marble, the Black Marble; with the provider's service for detail | `.jpg` and `.json` |
+| `imagery` | `imagery.py`, `body_maps.py` | Equirectangular images with a role. The Earth (`day`, `night-lights`): true colour of a day (gaps filled from the day before), the Blue Marble, the Black Marble, with the provider's service for detail. Other bodies (`body`), Saturn's rings (`rings`, a radial strip) and the whole sky in galactic coordinates (`sky`, its orientation checked against bright stars). | `.jpg` or `.png`, and `.json` |
 
 ## 5. Datasets
 
@@ -84,6 +85,7 @@ Products are written to `data/cache/products/` and listed by kind in `index.json
 | `aigefs` | ncss | NOAA NCEP and EPIC, via Unidata THREDDS | NOAA's AI ensemble: mean and spread |
 | `gibs-daily` | http | NASA GIBS | Yesterday's Earth from VIIRS, true colour |
 | `gibs-static` | http | NASA GIBS | The Blue Marble by day, the Black Marble by night |
+| `solar-system-maps` | files | Solar System Scope (INOVE), from NASA, JPL and ESA data, via Wikimedia Commons | Maps of the Sun, the Moon, the planets, Saturn's rings and the Milky Way |
 
 ### 5.2 Planned
 
