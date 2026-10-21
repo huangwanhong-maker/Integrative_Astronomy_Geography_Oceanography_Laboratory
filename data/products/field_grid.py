@@ -18,6 +18,12 @@ The grid is normalised so that every product reads the same way:
   (Temperature_isobaric@500hPa, "Temperature at 500 hPa"), and only the times
   common to all files are kept.
 
+A climatology (a manifest with a "climatology" period, such as monthly normals
+of 1991-2020) describes a typical year, not a sequence of instants. Its times
+are the middles of the months of the period's middle year, and the product
+records the period, so that an application shows each month's normal at the
+same time of any year (CF Conventions, section 7.4).
+
 Values are stored as 16-bit integers, one linear scale per variable:
 value = q * scale + offset, with q = -32768 for no value. The scale is chosen
 from the variable's range, so the rounding error is at most range / 130 000.
@@ -55,7 +61,7 @@ LAT_NAMES = {"latitude", "lat", "y", "nav_lat"}
 LON_NAMES = {"longitude", "lon", "x", "nav_lon"}
 UNIT_ALIASES = {"meters": "m", "meter": "m", "metres": "m", "second": "s", "seconds": "s", "sec": "s",
                 "degrees": "degree", "degrees_true": "degree", "deg": "degree", "Celsius": "degree_C",
-                "celsius": "degree_C", "degC": "degree_C", "kelvin": "K", "fraction": "1",
+                "celsius": "degree_C", "degC": "degree_C", "deg C": "degree_C", "kelvin": "K", "fraction": "1",
                 "m/s": "m s-1", "gpm": "m", "1/s": "s-1", "J/kg": "J kg-1", "kg.m-2": "kg m-2", "kg/m^2": "kg m-2"}
 VECTOR = re.compile(r"^(eastward|northward)_(.+)$")
 
@@ -74,8 +80,27 @@ def regular(values: np.ndarray, what: str) -> float:
     return float(steps.mean()) if len(steps) else 0.0
 
 
-def decode_times(ds: netcdf3.Dataset, name: str) -> list[str]:
+def climatological_year(period: str) -> int:
+    """The middle year of a period 'YYYY-MM-DD/YYYY-MM-DD', which places a climatology's months."""
+    start, end = (int(part[:4]) for part in period.split("/"))
+    return (start + end) // 2
+
+
+def month_middles(year: int, months) -> list[str]:
+    out = []
+    for m in months:
+        m = int(round(float(m)))
+        a = dt.datetime(year, m, 1, tzinfo=dt.timezone.utc)
+        b = dt.datetime(year + (m == 12), m % 12 + 1, 1, tzinfo=dt.timezone.utc)
+        out.append((a + (b - a) / 2).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    return out
+
+
+def decode_times(ds: netcdf3.Dataset, name: str, climatology: dict | None = None) -> list[str]:
     units = ds.variables[name].attributes.get("units", "")
+    if climatology and units.strip().lower() in ("months", "month", "month of year"):
+        # Months of the year, 1 to 12, as in TerraClimate's normals.
+        return month_middles(climatological_year(climatology["period"]), ds.array(name))
     m = re.match(r"(\w+) since (.+)", units)
     if not m:
         raise SystemExit(f"cannot read the time units {units!r}")
@@ -135,13 +160,13 @@ class Grid:
         return x
 
 
-def read(path: Path, level: str | None, overrides: dict):
+def read(path: Path, level: str | None, overrides: dict, climatology: dict | None = None):
     """The grid, times and variables of one file, as (Grid, [times], [(entry, values)])."""
     ds = netcdf3.Dataset.open(path)
     grid = Grid(ds)
     time_name = next((n for n, v in ds.variables.items() if len(v.dimensions) == 1
                       and (v.attributes.get("standard_name") == "time" or n == "time")), None)
-    times = decode_times(ds, time_name) if time_name else []
+    times = decode_times(ds, time_name, climatology) if time_name else []
     out = []
     for vname, v in ds.variables.items():
         dims = [d for d in v.dimensions if not (ds.dimensions[d] == 1 and d != time_name)]
@@ -173,9 +198,9 @@ def read(path: Path, level: str | None, overrides: dict):
 
 
 def build(files: list[tuple[Path, str | None]], name: str, title: str, domain: str, source: dict,
-          overrides: dict, model: str | None = None) -> dict:
+          overrides: dict, model: str | None = None, climatology: dict | None = None) -> dict:
     """A product from one or more files on the same grid; times common to all files are kept."""
-    parts = [read(path, level, overrides) for path, level in files]
+    parts = [read(path, level, overrides, climatology) for path, level in files]
     grid = parts[0][0]
     for g, _, _ in parts[1:]:
         if g.meta != grid.meta:
@@ -243,10 +268,14 @@ def build(files: list[tuple[Path, str | None]], name: str, title: str, domain: s
     }
     if model:
         product["model"] = model
+    if climatology:
+        product["climatology"] = {"period": climatology["period"], "year": climatological_year(climatology["period"]),
+                                  "cycle": "year"}
     json_path = OUT / f"fields-{name}.json"
     json_path.write_text(json.dumps(product, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     register("fields", {
         "name": name, "file": json_path.name, "title": title, "domain": domain, "model": model,
+        "climatology": product.get("climatology"),
         "variables": [{k: v.get(k) for k in ("name", "long_name", "standard_name", "units", "level")} for v in variables],
         "vectors": vectors,
         "times": {"count": len(common), "first": common[0] if common else None, "last": common[-1] if common else None},
@@ -266,7 +295,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--domain", default="climate", help="field of the data (with --input)")
     args = parser.parse_args(argv)
 
-    model = None
+    model, climatology = None, None
     if args.source:
         manifest = json.loads((DATA / "registry" / f"{args.source}.json").read_text(encoding="utf-8"))
         tag = args.profile or manifest.get("default_profile", "default")
@@ -284,7 +313,7 @@ def main(argv: list[str]) -> int:
                   "licence": manifest["licence"], "citation": manifest["citation"],
                   "retrieved_at": retrieval["retrieved_at"], "request": retrieval["requests"][0]["url"]}
         domain, overrides = manifest.get("domain", "geography"), manifest.get("attributes", {})
-        model = manifest.get("model")
+        model, climatology = manifest.get("model"), manifest.get("climatology")
     elif args.input:
         files = [(Path(args.input), None)]
         name = args.name or Path(args.input).stem
@@ -293,7 +322,7 @@ def main(argv: list[str]) -> int:
         domain, overrides = args.domain, {}
     else:
         parser.error("give --source or --input")
-    product = build(files, name, title, domain, source, overrides, model)
+    product = build(files, name, title, domain, source, overrides, model, climatology)
     g = product["grid"]
     print(f"fields-{name}: {len(product['variables'])} variable(s) "
           f"({', '.join(v['name'] for v in product['variables'])}), {len(product['times'])} time(s), "

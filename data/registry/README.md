@@ -12,11 +12,12 @@ Manifests are read by [`../acquisition/fetch.py`](../acquisition/fetch.py). It d
 
 | Kind | Meaning | Example |
 |---|---|---|
-| `files` | Fixed files, downloaded as they are. Each file's SHA-256 is recorded in the manifest and verified on every retrieval. | `jpl-de440s`, `natural-earth-50m`, `solar-system-maps` |
+| `files` | Fixed files, downloaded as they are, or taken from a zip archive on the web. Each file's SHA-256 is recorded in the manifest and verified on every retrieval. | `jpl-de440s`, `natural-earth-50m`, `solar-system-maps`, `koppen-geiger` |
 | `tap` | A query to an astronomical archive through the IVOA Table Access Protocol | `gaia-dr3`, `ungc`, `tully-2mass-groups` |
 | `griddap` | A subset of a gridded dataset served by ERDDAP: which variables, which times, how fine a grid | `gfs`, `oisst`, `ww3`, `etopo-2022` |
 | `http` | One or more web requests built from URL templates | `worldbank-indicators`, `usgs-earthquakes`, `gibs-daily`, `gibs-static` |
 | `ncss` | Groups of variables of a forecast model's collection on a THREDDS server, by its NetCDF Subset Service: levels, times and grid spacing | `gfs-levels`, `aigfs`, `aigefs` |
+| `opendap` | One variable from each of several datasets on an OPeNDAP (DAP2) server, every n-th point of the grid, saved as netCDF classic | `terraclimate-normals` |
 
 All kinds except `files` declare parameters and profiles, so that a user chooses which part of a dataset to take and how much of it ([ADR 0012](../../development/decisions/0012-selectable-parameterised-datasets.md)).
 
@@ -30,17 +31,20 @@ All kinds except `files` declare parameters and profiles, so that a user chooses
 | `title`, `provider` | What the dataset is and who produced it |
 | `credit` | A short attribution, shown on maps |
 | `model` | For forecast models: the model's short name (GFS, AIGFS), by which applications offer a choice of model |
+| `climatology` | For normals: `{period: "YYYY-MM-DD/YYYY-MM-DD"}`. The product's times become the months of a typical year (§9). |
 | `format`, `coverage` | Units, frames, epochs, grids; what the data cover |
 | `licence`, `citation` | Terms of use, and how to cite. The project's MIT licence does not cover data. |
 | `used_by` | The applications or modules that depend on the dataset |
 
 ## 3. Fields of `files` Datasets
 
-`files` is a list of `{url, file, size, sha256}`. A `null` checksum marks a file never verified; run `fetch.py --record` once to record it. Prefer URLs pinned to a release (for example a git tag), so that checksums stay valid. A file may carry further fields that its product builder reads; for example, `solar-system-maps` names the `body` each map shows.
+`files` is a list of `{url, file, size, sha256}`. A `null` checksum marks a file never verified; run `fetch.py --record` once to record it. Prefer URLs pinned to a release (for example a git tag), so that checksums stay valid. A file may carry further fields that its product builder reads; for example, `solar-system-maps` names the `body` each map shows, and `koppen-geiger` the `period` and `scenario` of each map.
+
+A file with a `member` is that member of the zip archive at `url`. The fetcher reads the archive's directory and the member by HTTP range requests, without downloading the archive; the checksum is the member's.
 
 ## 4. Parameters and Profiles
 
-These fields are shared by the parameterised kinds (`tap`, `griddap`, `http`).
+These fields are shared by the parameterised kinds (`tap`, `griddap`, `http`, `ncss`, `opendap`).
 
 | Field | Meaning |
 |---|---|
@@ -101,7 +105,18 @@ The resolved instants are recorded in the provenance.
 
 Times run from `start` to `end` every `step_hours`, aligned to 00:00 UTC. A product built from the files names each variable with its level, as in `Temperature_isobaric@850hPa`.
 
-## 9. Usage
+## 9. Fields of `opendap` Datasets
+
+| Field | Meaning |
+|---|---|
+| `service` | The OPeNDAP base URL, such as a THREDDS server's `.../thredds/dodsC/` |
+| `datasets` | One `{path, variable, file}` for each variable: the dataset's path under `service`, the variable to take, and the netCDF file to write |
+| `attributes` | Standard names, long names, units and cell methods to set on the variables |
+| `climatology` | For normals, their period (§2) |
+
+The parameter `stride` takes every n-th point along the horizontal dimensions (`lat`, `lon` and their synonyms), and every point along the others. The subset is a point sample, not an area mean. The fetcher reads the dataset's structure and attributes (DDS and DAS), requests the hyperslab in binary (DAP2), and writes it with the variable's attributes and coordinates.
+
+## 10. Usage
 
 ```
 python data/acquisition/fetch.py --list                               # datasets, parameters, profiles

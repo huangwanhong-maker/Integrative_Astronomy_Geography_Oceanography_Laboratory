@@ -1,9 +1,13 @@
-"""A reader for netCDF classic files (CDF-1 and CDF-2), standard library only.
+"""A reader and a writer for netCDF classic files (CDF-1 and CDF-2).
 
 ERDDAP and many other services deliver gridded data in this format. The reader
 parses the header (dimensions, attributes, variables) and reads variables as
 Python arrays, unpacking scale_factor and add_offset and turning fill values
-into NaN for floating-point results.
+into NaN for floating-point results; it needs only the standard library.
+
+The writer stores fixed-size variables (no record dimension) in the 64-bit
+offset format, so that data fetched in other forms, such as OPeNDAP responses,
+are cached in a standard, self-describing file. It needs numpy.
 
 Reference: Unidata, "NetCDF Classic and 64-bit Offset File Formats"
 (https://docs.unidata.ucar.edu/netcdf-c/current/file_format_specifications.html).
@@ -205,3 +209,94 @@ class Dataset:
         for i, x in enumerate(raw):
             out[i] = math.nan if (x in fills or (isinstance(x, float) and math.isnan(x))) else x * scale + offset
         return out
+
+
+# ---- writing ----------------------------------------------------------------
+
+NC_TYPE_OF = {"int8": 1, "int16": 3, "int32": 4, "float32": 5, "float64": 6}
+
+
+def _name_bytes(name: str) -> bytes:
+    raw = name.encode("utf-8")
+    return struct.pack(">I", len(raw)) + raw + b"\x00" * _pad(len(raw))
+
+
+def _typed(value):
+    """An attribute value as (nc_type, big-endian bytes, count)."""
+    import numpy as np
+    if isinstance(value, str):
+        raw = value.encode("utf-8")
+        return 2, raw, len(raw)
+    if isinstance(value, (bool, int)):
+        a = np.asarray([value], ">i4")
+    elif isinstance(value, float):
+        a = np.asarray([value], ">f8")
+    elif isinstance(value, (list, tuple)):
+        a = np.asarray(value)
+        a = a.astype(">i4" if a.dtype.kind in "iu" else ">f8")
+    else:                                   # a numpy scalar or array keeps its type
+        a = np.atleast_1d(np.asarray(value))
+        a = a.astype(a.dtype.newbyteorder(">"))
+    return NC_TYPE_OF[a.dtype.newbyteorder("=").name], a.tobytes(), a.size
+
+
+def _attributes_bytes(attributes: dict) -> bytes:
+    if not attributes:
+        return struct.pack(">II", 0, 0)
+    out = struct.pack(">II", NC_ATTRIBUTE, len(attributes))
+    for name, value in attributes.items():
+        nc_type, raw, count = _typed(value)
+        out += _name_bytes(name) + struct.pack(">II", nc_type, count) + raw + b"\x00" * _pad(len(raw))
+    return out
+
+
+def write(path: str | Path, dimensions: dict, variables: dict, attributes: dict | None = None) -> None:
+    """Writes a netCDF classic file (64-bit offset format) of fixed-size variables.
+
+    dimensions: name -> length. variables: name -> (dimension names, numpy
+    array of int8, int16, int32, float32 or float64, attributes). An attribute
+    is a str (written as text), a Python int or float (as int32 or double), a
+    list of numbers, or a numpy scalar or array (in its own type, as CF
+    requires of _FillValue).
+    """
+    import numpy as np
+    dim_names = list(dimensions)
+    arrays = {}
+    for name, (dims, data, _) in variables.items():
+        data = np.ascontiguousarray(data)
+        if data.dtype.name not in NC_TYPE_OF:
+            raise NetCDFError(f"{name}: cannot write values of type {data.dtype}")
+        if tuple(dimensions[d] for d in dims) != data.shape:
+            raise NetCDFError(f"{name}: shape {data.shape} does not match dimensions {dims}")
+        arrays[name] = data.astype(data.dtype.newbyteorder(">"))
+
+    def header(begins: list[int]) -> bytes:
+        out = b"CDF\x02" + struct.pack(">I", 0)
+        out += struct.pack(">II", NC_DIMENSION, len(dim_names)) if dim_names else struct.pack(">II", 0, 0)
+        for d in dim_names:
+            out += _name_bytes(d) + struct.pack(">I", dimensions[d])
+        out += _attributes_bytes(attributes or {})
+        out += struct.pack(">II", NC_VARIABLE, len(variables)) if variables else struct.pack(">II", 0, 0)
+        for (name, (dims, _, attrs)), begin in zip(variables.items(), begins):
+            a = arrays[name]
+            out += _name_bytes(name) + struct.pack(">I", len(dims))
+            out += b"".join(struct.pack(">I", dim_names.index(d)) for d in dims)
+            out += _attributes_bytes(attrs)
+            vsize = a.nbytes + _pad(a.nbytes)
+            out += struct.pack(">II", NC_TYPE_OF[a.dtype.newbyteorder("=").name], min(vsize, 0xFFFFFFFF))
+            out += struct.pack(">Q", begin)
+        return out
+
+    size = len(header([0] * len(variables)))
+    begins = []
+    for name in variables:
+        begins.append(size)
+        size += arrays[name].nbytes + _pad(arrays[name].nbytes)
+    path = Path(path)
+    part = path.with_name(path.name + ".part")
+    with part.open("wb") as out:
+        out.write(header(begins))
+        for name in variables:
+            raw = arrays[name].tobytes()
+            out.write(raw + b"\x00" * _pad(len(raw)))
+    part.replace(path)

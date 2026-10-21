@@ -1,11 +1,13 @@
 """Acquire registered datasets into the local cache.
 
 A dataset is described by a manifest in ``data/registry/`` (schema:
-``data/registry/README.md``). There are four kinds:
+``data/registry/README.md``). There are six kinds:
 
 ``files``
     Fixed files, downloaded as they are, such as the DE440 kernel. Their
     checksums are recorded in the manifest and verified on every retrieval.
+    A file may be a member of a zip archive on the web, read by range
+    requests without downloading the archive.
 ``tap``
     A query to an astronomical archive through the Table Access Protocol, such
     as Gaia.
@@ -20,6 +22,10 @@ A dataset is described by a manifest in ``data/registry/`` (schema:
     Subsets of a forecast model's collection on a THREDDS server, through its
     NetCDF Subset Service: groups of variables at chosen levels, times and
     grid spacing, such as the GFS at 500 hPa or NOAA's AI model AIGFS.
+``opendap``
+    Subsets of gridded datasets on an OPeNDAP (DAP2) server, by index ranges
+    and strides, saved as netCDF classic files, such as TerraClimate's monthly
+    climate normals.
 
 Every kind except ``files`` declares parameters (which part of the data and how
 much of it) and named profiles. A retrieval chooses a profile and may override
@@ -55,6 +61,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from pathlib import Path
 
 DATA = Path(__file__).resolve().parents[1]
@@ -66,6 +73,7 @@ sys.path.insert(0, str(DATA / "catalogs"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import erddap  # noqa: E402
 import ncss  # noqa: E402
+import remotezip  # noqa: E402
 import tap  # noqa: E402
 
 UTC = dt.timezone.utc
@@ -119,14 +127,29 @@ def _download(url: str, dest: Path, timeout: int) -> None:
     part.replace(dest)
 
 
+def extract_member(url: str, member: str, dest: Path, archives: dict) -> None:
+    """Writes one member of a remote zip archive to dest, reading only its bytes."""
+    if url not in archives:
+        archives[url] = zipfile.ZipFile(remotezip.RemoteFile(url))
+    data = archives[url].read(member)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    part = dest.with_name(dest.name + ".part")
+    part.write_bytes(data)
+    part.replace(dest)
+    print(f"  {dest.name}: {len(data) / 1e6:.2f} MB from {member}")
+
+
 def acquire_files(path: Path, manifest: dict, record: bool) -> bool:
     ident = manifest["id"]
     ok, changed, retrieved = True, False, []
+    archives = {}
     for entry in manifest["files"]:
         dest = CACHE / ident / entry["file"]
         expected = entry.get("sha256")
         if dest.exists() and (expected is None or sha256_of(dest) == expected):
             print(f"  {entry['file']}: cached")
+        elif "member" in entry:
+            extract_member(entry["url"], entry["member"], dest, archives)
         else:
             download(entry["url"], dest)
         digest, size = sha256_of(dest), dest.stat().st_size
@@ -140,7 +163,8 @@ def acquire_files(path: Path, manifest: dict, record: bool) -> bool:
                 print(f"  {entry['file']}: checksum recorded")
             else:
                 print(f"  {entry['file']}: unverified (no recorded checksum); run with --record")
-        retrieved.append({"file": entry["file"], "url": entry["url"], "size": size, "sha256": digest})
+        retrieved.append({"file": entry["file"], "url": entry["url"], "size": size, "sha256": digest}
+                         | ({"member": entry["member"]} if "member" in entry else {}))
     (CACHE / ident / "retrieval.json").write_text(json.dumps(
         {"dataset": ident, "retrieved_at": now(), "files": retrieved}, indent=2) + "\n", encoding="utf-8")
     if changed:
@@ -425,7 +449,49 @@ def acquire_ncss(manifest: dict, profile: str | None, overrides: dict, refresh: 
     return True
 
 
-ACQUIRE = {"tap": acquire_tap, "griddap": acquire_griddap, "http": acquire_http, "ncss": acquire_ncss}
+def acquire_opendap(manifest: dict, profile: str | None, overrides: dict, refresh: bool) -> bool:
+    """One variable from each of several OPeNDAP datasets, every stride-th point
+    of the horizontal grid, each saved as a netCDF classic file (needs numpy)."""
+    import opendap
+    values, tag = resolve(manifest, profile, overrides)
+    folder = CACHE / manifest["id"] / tag
+    stride = int(values.get("stride", 1))
+    print(f"  profile {tag}: " + ", ".join(f"{k}={v}" for k, v in values.items()))
+    base = manifest["service"].rstrip("/")
+    try:
+        requests = []
+        for item in manifest["datasets"]:
+            url = f"{base}/{item['path']}"
+            _, dims = opendap.dds(url)[item["variable"]]
+            requests.append({"url": opendap.request_url(url, item["variable"], opendap.hyperslab(dims, stride)),
+                             "dataset": url, "variable": item["variable"], "file": item["file"]})
+    except (opendap.DapError, KeyError, urllib.error.URLError, OSError) as error:
+        if (folder / "retrieval.json").exists():
+            print(f"  the service could not be reached ({error}); keeping the cached retrieval")
+            return True
+        print(f"  REQUEST FAILED: {error}")
+        return False
+    if cached(folder, [r["url"] for r in requests], [r["file"] for r in requests]) and not refresh:
+        print(f"  cached in {folder.relative_to(DATA.parent)}")
+        return True
+    folder.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
+    for r in requests:
+        print(f"  {r['file']}: requesting {r['variable']} every {stride} point(s)")
+        try:
+            info = opendap.fetch_to_netcdf(r["dataset"], r["variable"], stride, folder / r["file"])
+        except (opendap.DapError, urllib.error.URLError, OSError) as error:
+            print(f"  REQUEST FAILED: {r['file']}: {error}")
+            return False
+        r["dimensions"] = info["dimensions"]
+    write_provenance(folder, manifest, tag, values, {"stride": stride}, requests, started)
+    total = sum((folder / r["file"]).stat().st_size for r in requests)
+    print(f"  {len(requests)} file(s), {total / 1e6:.1f} MB in {folder.relative_to(DATA.parent)}")
+    return True
+
+
+ACQUIRE = {"tap": acquire_tap, "griddap": acquire_griddap, "http": acquire_http, "ncss": acquire_ncss,
+           "opendap": acquire_opendap}
 
 
 # ---- listing ----------------------------------------------------------------
