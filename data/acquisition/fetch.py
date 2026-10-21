@@ -99,7 +99,8 @@ def load(path: Path) -> dict:
 # ---- fixed files ------------------------------------------------------------
 
 def download(url: str, dest: Path, timeout: int = 60, attempts: int = 1) -> None:
-    """Downloads url to dest, through a .part file; retries on failure."""
+    """Downloads url to dest, through a .part file; retries on failure, resuming
+    where the last attempt stopped when the server allows it."""
     for attempt in range(1, attempts + 1):
         try:
             _download(url, dest, timeout)
@@ -112,18 +113,33 @@ def download(url: str, dest: Path, timeout: int = 60, attempts: int = 1) -> None
 
 
 def _download(url: str, dest: Path, timeout: int) -> None:
+    """One attempt. A .part file left by an earlier attempt is continued by a
+    range request (RFC 9110, section 14) if the server answers it (206), and
+    begun again otherwise. A response shorter than its Content-Length is an
+    error: the connection ended early, and the .part file is kept for the next
+    attempt."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_name(dest.name + ".part")
-    request = urllib.request.Request(url, headers={"User-Agent": "laboratory-data-fetch/1 (+https://github.com/huangwanhong-maker/Integrative_Astronomy_Geography_Oceanography_Laboratory)"})
-    with urllib.request.urlopen(request, timeout=timeout) as response, part.open("wb") as out:
-        total = int(response.headers.get("Content-Length") or 0)
-        done = 0
-        for block in iter(lambda: response.read(CHUNK), b""):
-            out.write(block)
-            done += len(block)
-            if total:
-                print(f"\r  {dest.name}: {done / total:6.1%}", end="", flush=True)
+    have = part.stat().st_size if part.exists() else 0
+    headers = {"User-Agent": "laboratory-data-fetch/1 (+https://github.com/huangwanhong-maker/Integrative_Astronomy_Geography_Oceanography_Laboratory)"}
+    if have:
+        headers["Range"] = f"bytes={have}-"
+    request = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        resumed = have and response.status == 206
+        if not resumed:
+            have = 0
+        total = have + int(response.headers.get("Content-Length") or 0)
+        done = have
+        with part.open("ab" if resumed else "wb") as out:
+            for block in iter(lambda: response.read(CHUNK), b""):
+                out.write(block)
+                done += len(block)
+                if total:
+                    print(f"\r  {dest.name}: {done / total:6.1%}", end="", flush=True)
     print()
+    if total and done != total:
+        raise OSError(f"{dest.name}: the transfer ended at {done} of {total} bytes")
     part.replace(dest)
 
 
@@ -151,7 +167,7 @@ def acquire_files(path: Path, manifest: dict, record: bool) -> bool:
         elif "member" in entry:
             extract_member(entry["url"], entry["member"], dest, archives)
         else:
-            download(entry["url"], dest)
+            download(entry["url"], dest, timeout=120, attempts=5)
         digest, size = sha256_of(dest), dest.stat().st_size
         if expected is not None and digest != expected:
             print(f"  {entry['file']}: CHECKSUM MISMATCH (expected {expected}, got {digest})")
@@ -387,6 +403,11 @@ def acquire_http(manifest: dict, profile: str | None, overrides: dict, refresh: 
     present = dt.datetime.now(UTC)
     filled = {k: resolve_time(v, present) if manifest["parameters"][k].get("type") == "time" else v
               for k, v in values.items()}
+    # A time parameter with align_hours is moved down to a whole multiple of that
+    # many hours since 00:00 UTC, as the cycles of a forecast model are.
+    for k, spec in manifest["parameters"].items():
+        if spec.get("type") == "time" and spec.get("align_hours"):
+            filled[k] = ncss.align(filled[k], int(spec["align_hours"]))
     requests = [{"url": r["url"].format(**filled), "file": r["file"]} for r in manifest["requests"]]
     resolved = {k: erddap.iso(v) for k, v in filled.items() if isinstance(v, dt.datetime)}
     if cached(folder, [r["url"] for r in requests], [r["file"] for r in requests]) and not refresh:
