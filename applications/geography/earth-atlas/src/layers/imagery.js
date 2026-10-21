@@ -7,8 +7,15 @@
 // product: a WMS) for the region in view, at the screen's resolution, and the
 // shader draws it over the global image. The request carries the same layer
 // and date as the product, so detail and whole agree.
+//
+// On the relief map, the detail is shaded relief of the land (ASTER GDEM,
+// from 30 m elevations), which replaces the relief map's coarser shading.
+// Its water is one uniform grey; a pixel of that grey whose whole
+// neighbourhood has it is taken as water, and the shading is not applied
+// there.
 
 import { imageTexture, setTexture } from '../render/surface.js';
+import { waterMask } from '../core/raster.js';
 
 function loadImage(url) {
   return new Promise((resolve, reject) => {
@@ -66,6 +73,34 @@ export class ImageryLayer {
 
   // Imagery products by day, for the panel.
   dayImagery() { return this.library.list('imagery').filter((e) => e.role === 'day'); }
+
+  // What the detail layer should refine: the imagery shown, or on the relief
+  // map the shaded relief product (its metadata only; the global image is not drawn).
+  async detailSource() {
+    if (this.active) return this.active;
+    if (this.style !== 'relief') return null;
+    const entry = this.entry('relief-shading');
+    if (!entry) return null;
+    if (!this.metas.has(entry.name)) this.metas.set(entry.name, await (await fetch(`${this.library.base}/${entry.file}`)).json());
+    return this.metas.get(entry.name);
+  }
+}
+
+// A texture of shaded relief for the shader: R the grey, G 255 on land and 0 on water.
+function shadingTexture(img, level, renderer) {
+  const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const g = canvas.getContext('2d', { willReadFrequently: true });
+  g.drawImage(img, 0, 0);
+  const data = g.getImageData(0, 0, w, h), px = data.data;
+  const grey = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) grey[i] = px[4 * i];
+  const water = waterMask(grey, w, h, level);
+  for (let i = 0; i < w * h; i++) { px[4 * i + 1] = water[i] ? 0 : 255; px[4 * i + 2] = 0; px[4 * i + 3] = 255; }
+  g.putImageData(data, 0, 0);
+  return imageTexture(canvas, renderer, false);
 }
 
 export class DetailLayer {
@@ -111,6 +146,8 @@ export class DetailLayer {
   // Called when the view settles; asks for detail if the view is close enough.
   request(imagery) {
     clearTimeout(this.timer);
+    // Detail of another source fades out at once rather than lying over the new one.
+    if (this.box && imagery && this.box.key !== imagery.name) this.target = 0;
     this.timer = setTimeout(() => this.fetch(imagery), 450);
   }
 
@@ -136,9 +173,13 @@ export class DetailLayer {
     try {
       const img = await loadImage(url);
       if (this.pending !== ticket) return;
-      setTexture(this.stage.material, 'uDetail', imageTexture(img, s.renderer, false));
+      const shading = imagery.role === 'relief-shading';
+      setTexture(this.stage.material, 'uDetail', shading ? shadingTexture(img, imagery.levels.water, s.renderer) : imageTexture(img, s.renderer, false));
+      u.uDetailKind.value = shading ? 1 : 0;
+      if (shading) u.uShadeFlat.value = imagery.levels.flat / 255;
       u.uDetailBox.value.set(west, south, w, h);
       this.box = { key: imagery.name, extent: box };
+      this.source = imagery;
       this.target = 1;
       this.fade = 0;
       this.status = '';
@@ -157,7 +198,7 @@ export class DetailLayer {
     return true;
   }
 
-  clear() { this.target = 0; this.box = null; }
+  clear() { this.target = 0; this.box = null; this.source = null; }
 }
 
 function contains(outer, inner) {

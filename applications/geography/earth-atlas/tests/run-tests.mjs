@@ -12,7 +12,7 @@ import { subsolarPoint, sunAltAz, gmst, julianDate, daylight, localMeanSolarTime
 import { equalEarth, equirectangular, forward, inverse, extent, areaScale } from '../src/core/projections.js';
 import { gridPosition, bilinear, timeBracket, FieldProduct, areaMean } from '../src/core/grid.js';
 import { isolines, levels, extrema } from '../src/core/contour.js';
-import { fillRings, indexRaster, maskRaster, areaFraction, featureAreaFraction } from '../src/core/raster.js';
+import { fillRings, indexRaster, maskRaster, areaFraction, featureAreaFraction, waterMask } from '../src/core/raster.js';
 import { ParticleSystem, uniformSpawn } from '../src/core/flow.js';
 import { windFromDirection, compassPoint, deepWaterGroupSpeed, waveEnergyVelocity, meanDirection } from '../src/core/derived.js';
 import { displayUnit, toShown, toStored, format } from '../src/core/units.js';
@@ -411,6 +411,22 @@ const random = seeded(20261022);
   } else {
     console.log('skip  field: fields-gfs-forecast missing');
   }
+}
+
+// ---- water in shaded relief ---------------------------------------------------------
+{
+  // A 40 x 30 relief of random greys (60-200), with a lake of the water grey (88)
+  // and single pixels of that grey scattered as shadows.
+  const w = 40, h = 30, grey = new Uint8Array(w * h), rnd = seeded(5);
+  for (let i = 0; i < w * h; i++) { grey[i] = 60 + Math.floor(140 * rnd()); if (grey[i] >= 87 && grey[i] <= 89) grey[i] = 120; }
+  for (let y = 10; y < 20; y++) for (let x = 5; x < 18; x++) grey[y * w + x] = 88;
+  const speckles = [[30, 4], [33, 25], [25, 12]];
+  for (const [x, y] of speckles) grey[y * w + x] = 88;
+  const m = waterMask(grey, w, h, 88);
+  let lake = 0;
+  for (let y = 10; y < 20; y++) for (let x = 5; x < 18; x++) lake += m[y * w + x];
+  assert('water mask: the whole lake, to its edge, is water', lake === 130, `${lake} of 130 pixels`);
+  assert('water mask: lone pixels of the water grey are not', speckles.every(([x, y]) => !m[y * w + x]));
 }
 
 // ---- climate: the Köppen–Geiger classification ------------------------------------

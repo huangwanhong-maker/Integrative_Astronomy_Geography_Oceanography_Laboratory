@@ -46,7 +46,7 @@ const state = {
 };
 
 let library, catalogue, stage, base, surface, flow, lines, events, labels, timeline, geography, elevation;
-let imagery, detail, labModel;
+let imagery, detail, labModel, detailSource = null;
 const lab = { input: null, running: false, progress: 0, verification: null, against: '', error: '' };
 const MODEL_COLOURS = ['#CA8DBE', '#f6c47e', '#9fb6e8', '#8fd1b4', '#e8a0a0'];
 const loaded = new Map();          // field products in memory, by name
@@ -103,9 +103,8 @@ async function start() {
     elevation = await library.field(relief[0]);
     loaded.set(relief[0], elevation);
   }
-  await new Promise((r) => setTimeout(r, 0));
   base.painted = state.style === 'plain' ? 'plain' : 'relief';
-  base.paint(elevation, base.painted);
+  const painting = base.paint(elevation, base.painted);
   imagery = new ImageryLayer(stage, library);
   detail = new DetailLayer(stage);
   labModel = new LabModel(library);
@@ -123,6 +122,7 @@ async function start() {
     selectSurface(state.surface, false), selectFlow(state.flow, false),
     selectLines(state.lines, false), selectEvents(state.events, false),
   ]);
+  await painting;
   progress(0.95);
 
   timeline = new Timeline($('timeline'), (t) => { state.live = false; state.playing = false; setTime(t); updatePlay(); remember(); });
@@ -292,8 +292,9 @@ function applyBase(key) {
       const want = state.style === 'plain' ? 'plain' : 'relief';
       if (base.painted !== want) { base.paint(elevation, want); base.painted = want; }
     }
-    imagery.setStyle(state.style).then(() => {
-      if (imagery.active) detail.request(imagery.active); else detail.clear();
+    imagery.setStyle(state.style).then(() => imagery.detailSource()).then((source) => {
+      detailSource = source;
+      if (source) detail.request(source); else detail.clear();
       dirty.legend = true;
     });
   }
@@ -749,6 +750,7 @@ function updateCredits() {
     if (p && p.meta && p.meta.source.credit) credits.add(p.meta.source.credit);
   }
   if (imagery && imagery.active) credits.add(`${imagery.active.source.credit}${imagery.active.date ? ` (${imagery.active.date})` : ''}`);
+  if (detail && detail.source && detail.source.role === 'relief-shading' && detail.target) credits.add(detail.source.source.credit);
   if (state.lights && imagery && imagery.entry('night-lights')) credits.add('NASA Black Marble');
   if (state.clouds && catalogue.clouds.length) credits.add(`clouds: ${catalogue.clouds[0].model}`);
   if (surface.def && surface.def.kind === 'indicator' && surface.product) credits.add(surface.product.source.credit);
@@ -887,7 +889,7 @@ function restore() {
 
 // ---- the frame loop ------------------------------------------------------------------
 
-let lastFrame = performance.now(), lastLive = 0, lastCoverage = 0, lastRevision = -1;
+let lastFrame = performance.now(), lastLive = 0, lastCoverage = 0, lastRevision = -1, lastDetailTarget = 0;
 function loop(now) {
   requestAnimationFrame(loop);
   const dt = Math.min(100, now - lastFrame);
@@ -909,9 +911,10 @@ function loop(now) {
   if (stage.revision !== lastRevision) {
     lastRevision = stage.revision;
     dirty.labels = true;
-    if (imagery.active) detail.request(imagery.active);
+    if (detailSource) detail.request(detailSource);
   }
   detail.frame();
+  if ((detail.target || 0) !== lastDetailTarget) { lastDetailTarget = detail.target || 0; dirty.legend = true; }
   if (dirty.labels) { dirty.labels = false; flow.viewChanged(); updateLabels(); }
   const res = stage.resolution;
   base.frame(res); flow.frame(res); lines.frame(res); events.frame(res);

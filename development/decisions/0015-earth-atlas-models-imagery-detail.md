@@ -1,6 +1,6 @@
 # 0015. Forecast Models, a Laboratory Model, Imagery and Detail in the Earth Atlas
 
-- **Status:** Accepted, provisionally: built while the user was away; open to revision on review. Amends [ADR 0014](0014-earth-atlas-separated-data-and-typed-layers.md).
+- **Status:** Accepted, provisionally: built while the user was away; open to revision on review. Amends [ADR 0014](0014-earth-atlas-separated-data-and-typed-layers.md). Amended by [ADR 0018](0018-fine-relief-at-close-range.md) (relief detail).
 - **Date:** 2026-10-22
 - **Decided by:** the user asked for weather prediction models, finer textures on the 3D globe, richer geography, and creativity. Claude chose the design below.
 

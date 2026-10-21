@@ -8,9 +8,12 @@
 //
 // The relief is shaded by Lambert's law under a light from the north-west, 45
 // degrees high, the cartographic convention. Slopes are taken from the elevation
-// grid by central differences on the sphere and exaggerated, since a 10' grid
-// smooths real slopes. The shading is kept in the alpha channel, so that data
-// layers drawn over the map can be shaded by the same relief.
+// grid by central differences on the sphere and exaggerated, since a coarse grid
+// smooths real slopes: the exaggeration is stated for a 10' grid and scaled with
+// the grid's spacing (a 5' grid resolves steeper slopes and needs half of it).
+// The darkening is limited, so that the steepest shaded slopes stay coloured.
+// The shading is kept in the alpha channel, so that data layers drawn over the
+// map can be shaded by the same relief.
 //
 // Sources: Horn (1981), "Hill shading and the reflectance map", Proc. IEEE 69(1);
 // Imhof (1982), Cartographic Relief Presentation, ch. 8 and 13 (hypsometric tints).
@@ -28,7 +31,7 @@ export const STYLES = {
     ice: [[0, '#d9d4e6'], [2000, '#e6e2ef'], [4000, '#f3f0f7']],
     lake: '#56739d',
     shelf: '#c6c7dc',
-    shade: { land: 0.85, ocean: 0.45, ice: 0.6, exaggeration: 14 },
+    shade: { land: 0.85, ocean: 0.45, ice: 0.6, exaggeration: 14 },     // exaggeration for a 10' grid
   },
   plain: {
     ocean: [[0, '#241d33'], [11000, '#1b1527']],
@@ -101,7 +104,7 @@ export function baseImage({ elevation, geography, coords, width, height, style =
   const r0 = new Int32Array(height), r1 = new Int32Array(height), fy = new Float32Array(height);
   if (elevation) {
     z = elevation.slice(elevation.meta.variables[0].name, 0);
-    shade = hillshade(elevation, z, st.shade.exaggeration);
+    shade = hillshade(elevation, z, st.shade.exaggeration * (eg.dlat / (10 / 60)));
     for (let i = 0; i < width; i++) {
       const x = ((((-180 + ((i + 0.5) * 360) / width - eg.lon0) / eg.dlon) % eg.nlon) + eg.nlon) % eg.nlon;
       c0[i] = Math.floor(x); c1[i] = (c0[i] + 1) % eg.nlon; fx[i] = x - c0[i];
@@ -137,7 +140,7 @@ export function baseImage({ elevation, geography, coords, width, height, style =
         r = oceanRamp[q]; gr = oceanRamp[q + 1]; b = oceanRamp[q + 2];
         strength = st.shade.ocean;
       }
-      const f = 1 + ((Number.isFinite(s) ? s : 1) - 1) * strength;
+      const f = Math.max(0.32, 1 + ((Number.isFinite(s) ? s : 1) - 1) * strength);
       out[4 * k] = r * f; out[4 * k + 1] = gr * f; out[4 * k + 2] = b * f;
       out[4 * k + 3] = Math.max(0, Math.min(255, Math.round(127.5 * (1 + ((Number.isFinite(s) ? s : 1) - 1) * (kind === 1 || kind === 3 ? 1 : 0.35)))));
     }

@@ -245,7 +245,7 @@ Each module directory contains:
 
 - Record decisions that shape structure, conventions or tooling in `development/decisions/NNNN-slug.md`, using the template in the index.
 - Never rewrite a record. A new record supersedes or amends it, and the old record's status is updated to point to the new one.
-- Records accepted so far: 0001–0017.
+- Records accepted so far: 0001–0018.
 
 ### 6.4 Change Discipline
 
@@ -318,7 +318,7 @@ Each module directory contains:
 
 As of 2026-10-22:
 
-- The architecture and decision records 0001–0017 are written.
+- The architecture and decision records 0001–0018 are written.
 - The layered directory structure is in place, with READMEs.
 - The three libraries are scaffolded as their own git repositories and attached under `lib/`.
 - All four repositories are published on GitHub.
@@ -338,9 +338,9 @@ As of 2026-10-22:
   - Its layers are typed by the shape of their data (surface, flow, lines, events, base), so new data appear without changes to code.
   - Forecasts from several models (GFS, NOAA's AI model AIGFS and the AIGEFS ensemble) can be chosen, compared as differences, and read side by side at a place (ADR 0015).
   - The laboratory's own model, the barotropic vorticity equation of the first numerical forecast (1950), runs in the page by the spectral transform method and is verified against analyses and persistence.
-  - Satellite imagery (VIIRS, Blue Marble, Black Marble lights at night) forms the base, with finer imagery fetched for the region in view.
+  - Satellite imagery (VIIRS, Blue Marble, Black Marble lights at night) or a relief map forms the base, with finer imagery, or shaded relief from 30 m elevations, fetched for the region in view ([ADR 0018](development/decisions/0018-fine-relief-at-close-range.md)).
   - Climate: Köppen–Geiger classes from 1901 to 2099 under four scenarios, and where they change; monthly normals; a climate diagram for any place on land; and our own classification of the normals, verified against the published map ([ADR 0017](development/decisions/0017-climate-classes-and-normals.md)).
-  - Its provisional JavaScript core is tested against JPL Horizons, Meeus, the Equal Earth paper, the Rossby–Haurwitz wave, Beck et al. (2023) and the real products: 93 checks, run with `node applications/geography/earth-atlas/tests/run-tests.mjs`.
+  - Its provisional JavaScript core is tested against JPL Horizons, Meeus, the Equal Earth paper, the Rossby–Haurwitz wave, Beck et al. (2023) and the real products: 95 checks, run with `node applications/geography/earth-atlas/tests/run-tests.mjs`.
 - `data/` is a general data library ([ADR 0012](development/decisions/0012-selectable-parameterised-datasets.md), [ADR 0014](development/decisions/0014-earth-atlas-separated-data-and-typed-layers.md)):
   - Manifests choose which data and how much: fixed files (or members of remote archives), TAP catalogue queries, ERDDAP grid subsets, THREDDS model subsets (NCSS), OPeNDAP subsets, or web requests, with parameters (including relative times) and profiles.
   - The TAP client serves ESA Gaia, CDS VizieR and SIMBAD. The ERDDAP client serves NOAA's forecasts, analyses and relief. The World Bank and the USGS are reached by web requests.

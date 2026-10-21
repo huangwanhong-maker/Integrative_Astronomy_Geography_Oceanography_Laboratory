@@ -100,3 +100,33 @@ export function featureAreaFraction(coords, runs) {
   }
   return Math.abs(sum) / (4 * Math.PI);
 }
+
+// Water in a grey shaded relief: pixels of the water's grey (within 1) whose
+// eight neighbours have it too, grown back by one pixel, so that a lone pixel of
+// that grey in a shadow is not taken for water. grey: Uint8Array (w x h).
+export function waterMask(grey, w, h, level) {
+  const at = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) at[i] = Math.abs(grey[i] - level) <= 1 ? 1 : 0;
+  const core = new Uint8Array(w * h);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      if (at[i] && at[i - 1] && at[i + 1] && at[i - w] && at[i + w] && at[i - w - 1] && at[i - w + 1] && at[i + w - 1] && at[i + w + 1]) core[i] = 1;
+    }
+  }
+  const out = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (!at[y * w + x]) continue;
+      let wet = 0;
+      for (let dy = -1; dy <= 1 && !wet; dy++) {
+        for (let dx = -1; dx <= 1 && !wet; dx++) {
+          const yy = y + dy, xx = x + dx;
+          if (yy >= 0 && yy < h && xx >= 0 && xx < w && core[yy * w + xx]) wet = 1;
+        }
+      }
+      out[y * w + x] = wet;
+    }
+  }
+  return out;
+}

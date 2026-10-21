@@ -1,6 +1,6 @@
 # Earth Atlas
 
-*Status: draft (2026-10-22). Kind: tool. Field: geography (cartography), showing data from meteorology, oceanography, geography and geophysics.* Decision records: [ADR 0014](../../../development/decisions/0014-earth-atlas-separated-data-and-typed-layers.md), [ADR 0015](../../../development/decisions/0015-earth-atlas-models-imagery-detail.md), [ADR 0017](../../../development/decisions/0017-climate-classes-and-normals.md).
+*Status: draft (2026-10-22). Kind: tool. Field: geography (cartography), showing data from meteorology, oceanography, geography and geophysics.* Decision records: [ADR 0014](../../../development/decisions/0014-earth-atlas-separated-data-and-typed-layers.md), [ADR 0015](../../../development/decisions/0015-earth-atlas-models-imagery-detail.md), [ADR 0017](../../../development/decisions/0017-climate-classes-and-normals.md), [ADR 0018](../../../development/decisions/0018-fine-relief-at-close-range.md).
 
 The Earth Atlas shows the atmosphere, the ocean, the land and the people of the Earth on one globe, at one instant. Each kind of data comes from its own dataset and is joined to the map only here, in the application. Forecasts from several models can be compared, among them a model of our own that runs in the page. Climates can be read too: their classes from 1901 to 2099, and the normal year of any place. The map itself is one dataset among others, and carries no values but names and places.
 
@@ -34,7 +34,7 @@ The Earth Atlas shows the atmosphere, the ocean, the land and the people of the 
 - **One instant, in UTC.**
   - Each layer shows its data nearest to that instant, and says which time it shows.
   - When that time differs from the instant shown, the legend says by how much, for example "Data from 30 h before the time shown".
-- **Detail where you look.** At close range the atlas asks NASA for imagery of the region in view at the screen's resolution, down to 250 m per pixel.
+- **Detail where you look.** At close range the atlas asks NASA for the region in view at the screen's resolution: imagery down to 250 m per pixel, or, on the relief map, shaded relief from 30 m elevations (ASTER GDEM), which replaces the map's coarser shading on land.
 
 ## 2. Running
 
@@ -46,6 +46,7 @@ python data/acquisition/fetch.py gfs-levels aigfs aigefs                  # mode
 python data/acquisition/fetch.py gibs-daily                               # yesterday's Earth from space
 python data/acquisition/fetch.py gibs-static --profile blue-marble
 python data/acquisition/fetch.py gibs-static --profile black-marble
+python data/acquisition/fetch.py gibs-relief                              # fine relief at close range
 python data/acquisition/fetch.py worldbank-indicators --profile population    # and other profiles; see --list
 python data/acquisition/fetch.py koppen-geiger terraclimate-normals        # climate classes and normals
 python data/products/geography.py
@@ -54,6 +55,7 @@ python data/products/class_raster.py --source koppen-geiger
 python data/products/imagery.py --source gibs-daily
 python data/products/imagery.py --source gibs-static --profile blue-marble
 python data/products/imagery.py --source gibs-static --profile black-marble
+python data/products/imagery.py --source gibs-relief
 python data/products/country_indicators.py
 python data/products/event_catalog.py
 python applications/geography/earth-atlas/serve.py --open
@@ -87,6 +89,7 @@ The page also loads three.js from jsDelivr and Source Serif 4 from Google Fonts.
 | Sea-surface temperature, anomaly, sea ice | OISST v2.1 (NOAA NCEI), via CoastWatch ERDDAP, 0.5°, daily | `fields-oisst-latest` | Public domain |
 | Waves: height, period, direction | WaveWatch III (NOAA NCEP), via PacIOOS ERDDAP, 1°, every 6 h | `fields-ww3-forecast` | Public domain |
 | The Earth from space, by day and by night | NASA GIBS: VIIRS true colour, Blue Marble, Black Marble, 8192 × 4096 | `imagery-*` | NASA, acknowledge |
+| Shaded relief of the land, for close range | NASA GIBS, from ASTER GDEM v3 (METI and NASA), 1″ | `imagery-relief-shading` | NASA, acknowledge |
 | Country indicators (11) | World Bank, World Development Indicators | `indicator-*` | CC BY 4.0 |
 | Earthquakes | USGS ComCat, magnitude 4.5 and above | `events-usgs-earthquakes-*` | Public domain |
 | Climate classes, 1901–2099 | Köppen–Geiger maps of Beck et al. (2023), 0.1°: 1901–1930, 1931–1960, 1961–1990, 1991–2020; 2041–2070 and 2071–2099 under SSP1-2.6, SSP2-4.5, SSP3-7.0 and SSP5-8.5 | `classes-koppen-geiger-*` | CC BY 4.0 |
@@ -108,7 +111,7 @@ The ERDDAP servers add: "The data may be used and redistributed for free but is 
 | Imagery and detail | Global images at 8192 × 4096. Gaps in a daily mosaic are filled from the day before; where imagery has none, the relief shows. At close range, a WMS request covers the region in view at the screen's resolution. | `data/products/imagery.py`, `src/layers/imagery.js` |
 | Isolines | Marching squares, saddles resolved by the cell mean. Highs and lows are extrema over a neighbourhood with a stated prominence (heights outside the tropics only). | `src/core/contour.js` |
 | Countries | Scanline rasterisation, even-odd rule, 4096 × 2048. Joins to indicators by stated keys. | `src/core/raster.js`, `src/core/join.js` |
-| Relief | Hypsometric tints, and Lambert shading from the north-west at 45°, exaggerated 14× on the 10′ grid | Imhof (1982) |
+| Relief | Hypsometric tints, and Lambert shading from the north-west at 45°, exaggerated 14× for a 10′ grid and in proportion to the grid's spacing (7× on the 5′ grid), with the darkening limited; painted at 8192 × 4096 in a worker. At close range, on land, ASTER's fine shading replaces it; water is the uniform grey of the shading where a whole neighbourhood has it. | Imhof (1982); `src/render/relief.js`, `src/core/raster.js` |
 | Colour maps | cmocean (Thyng et al. 2016, MIT licence), and the laboratory's own orchid map, with lightness rising evenly | `src/render/colormaps.js` |
 | Climate classes | Köppen–Geiger after Peel et al. (2007) and Beck et al. (2018): B first, summer the warmer half-year. Classes are read from the cell containing a place, never interpolated. Colours are the conventional ones, softened in OKLab. | `src/core/climate.js`, `src/render/classes.js`; [theory note](../../../theory/climate/koppen-geiger-classification.md) |
 | Climate diagram | Walter and Lieth (1960): 10 °C level with 20 mm; dry months (P ≤ 2T, Gaussen) dotted, humid hatched, above 100 mm a tenfold scale; frost months marked; from July south of the equator | `src/ui/climate.js` |
@@ -120,7 +123,7 @@ The ERDDAP servers add: "The data may be used and redistributed for free but is 
 node applications/geography/earth-atlas/tests/run-tests.mjs
 ```
 
-There are 93 checks. The checks on real data need the products; without them they are skipped.
+There are 95 checks. The checks on real data need the products; without them they are skipped.
 
 | Quantity | Reference | Agreement |
 |---|---|---|
@@ -136,6 +139,7 @@ There are 93 checks. The checks on real data need the products; without them the
 | Particles | Uniform flow along the equator; solid-body rotation, 2000 steps | Exact; latitude kept to 8 × 10⁻⁶ ° |
 | Rasterised land | Polygon area by the shoelace formula on the cylindrical equal-area plane | Within 8 × 10⁻⁶ of the sphere |
 | Joins | Natural Earth to World Bank | 219 of 242 countries; only Gibraltar unmatched |
+| Water in shaded relief | A lake and lone pixels of the water's grey | The lake whole, to its edge; no lone pixel |
 | Köppen–Geiger rules | Fifteen climates constructed for one rule each, including the precedence of B and both resolutions of s and w; all 30 classes reachable | Exact |
 | Köppen–Geiger symmetry | Invariance under (S₆ × S₆) ≀ ℤ/2, permutations within each half-year and their exchange, on 4000 random climates | Exact |
 | Our classes | Beck et al. (2023), 1991–2020, at the 195 203 land cells of the TerraClimate grid | 89.1 % of cells; 95.9 % by main group |
@@ -163,7 +167,7 @@ The computation in `src/core/` is a provisional stand-in for the laboratory's C+
 | `src/core/join.js` | Joins of data to places by key | `core/domains/geography` (GIS) |
 | `src/data/products.js` | Reads products from the data library | — |
 | `src/layers/` | The catalogue of layers and models; one module per kind of layer; imagery and detail; the laboratory model | `visualization/scene` |
-| `src/workers/` | The laboratory model's integration, off the page's main thread | — |
+| `src/workers/` | The laboratory model's integration and the painting of the base map, off the page's main thread | — |
 | `src/render/` | The surface shader, lines, markers, labels, relief, colour maps, colours of classes, the stage | `visualization/renderers` |
 | `src/ui/` | Panel, timeline, legend, place card, climate diagram | — |
 
@@ -172,7 +176,8 @@ The computation in `src/core/` is a provisional stand-in for the laboratory's C+
 - Fields are drawn at the resolution of their product (1° for the default forecasts). Finer profiles exist, at a cost in download.
 - The best time series of GFS and AIGFS join past analyses to the latest forecast. Their past is close to analyses; their future is one run's forecast.
 - The laboratory model is barotropic. It has little skill in the tropics, and its long waves drift west too fast (it lacks the equivalent-barotropic correction).
-- Detail is available for imagery, not yet for relief; ETOPO's server does not allow browsers to fetch it directly.
+- Fine relief is ASTER's shading, a picture: its elevations are not read, so tints stay those of the 5′ grid. ASTER covers land between about 83° N and 83° S; elsewhere, and on the sea floor, the ETOPO shading remains.
+- Glaciers are drawn from Natural Earth's 1:50 m outlines, coarser than the fine relief.
 - Natural Earth draws boundaries by its de facto depiction; disputed boundaries are dashed.
 - Climate classes are shown at 0.1°, about 11 km; Beck et al.'s maps exist at 1 km. The TerraClimate normals are point samples every 1/3°, not area means, and have no values over the sea.
 - The future maps show the classes of an ensemble-mean climate, not the spread among models.

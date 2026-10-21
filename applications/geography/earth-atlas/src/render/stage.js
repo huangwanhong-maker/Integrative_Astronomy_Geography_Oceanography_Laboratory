@@ -171,7 +171,7 @@ export class Stage {
       const v = this.globeView;
       v.lat = Math.max(-85, Math.min(85, v.lat));
       v.lon = wrapLongitude(v.lon);
-      v.dist = Math.max(1.12, Math.min(9, v.dist));
+      v.dist = Math.max(1.04, Math.min(9, v.dist));
       const p = toVector(v.lon, v.lat);
       this.perspective.position.set(p[0] * v.dist, p[1] * v.dist, p[2] * v.dist);
       this.perspective.lookAt(0, 0, 0);

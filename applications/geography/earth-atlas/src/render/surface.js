@@ -46,6 +46,8 @@ uniform float uLightsOn;
 uniform sampler2D uDetail;        // finer imagery or relief of one region
 uniform vec4 uDetailBox;          // west longitude, south latitude, width, height (degrees)
 uniform float uDetailOn;
+uniform float uDetailKind;        // 0 imagery (colour); 1 shaded relief (R: grey, G: 1 on land, 0 on water)
+uniform float uShadeFlat;         // the grey of flat land in the shaded relief, 0 to 1
 
 uniform int uMode;                // 0 none, 1 field, 2 speed of a vector, 3 countries, 4 difference A - B,
                                   // 5 classes, 6 classes where they differ from a second map
@@ -178,6 +180,7 @@ void main() {
   vec4 relief = seamless(uBase, uv);
   vec3 colour = relief.rgb;
   float shade = relief.a * 2.0;
+  float shadeData = shade;          // the shading applied to data drawn over the relief
   if (uImageryOn > 0.5) {
     vec3 img = seamless(uImagery, uv).rgb;
     // Where the imagery has no data (black), the relief shows through.
@@ -190,8 +193,18 @@ void main() {
     if (duv.x >= 0.0 && duv.x <= 1.0 && duv.y >= 0.0 && duv.y <= 1.0) {
       vec3 d = texture(uDetail, duv).rgb;
       float edge = smoothstep(0.0, 0.04, min(min(duv.x, 1.0 - duv.x), min(duv.y, 1.0 - duv.y)));
-      float has = smoothstep(0.012, 0.05, max(d.r, max(d.g, d.b)));
-      colour = mix(colour, d, edge * has * uDetailOn);
+      if (uDetailKind > 0.5) {
+        // Fine shading on land: the relief map's own, coarser shading divided out
+        // and the fine one applied, in the same form 1 + (s - 1) k (src/render/relief.js).
+        float land = d.g * edge * uDetailOn;
+        float fine = d.r / uShadeFlat;
+        float coarse = 1.0 + (shade - 1.0) * 0.85;
+        colour = mix(colour, colour / max(coarse, 0.25) * (1.0 + (fine - 1.0) * 0.9), land);
+        shadeData = mix(shade, fine, land);
+      } else {
+        float has = smoothstep(0.012, 0.05, max(d.r, max(d.g, d.b)));
+        colour = mix(colour, d, edge * has * uDetailOn);
+      }
     }
   }
 
@@ -227,7 +240,7 @@ void main() {
     }
     if (v > MISSING) {
       vec4 c = colourOf(v);
-      vec3 shaded = c.rgb * mix(1.0, shade, uReliefOnData) * dataNight;
+      vec3 shaded = c.rgb * mix(1.0, shadeData, uReliefOnData) * dataNight;
       colour = mix(colour, shaded, c.a * uOpacity);
     }
   } else if (uMode == 5 || uMode == 6) {
@@ -239,7 +252,7 @@ void main() {
         c.rgb = mix(c.rgb, vec3(dot(c.rgb, vec3(0.30, 0.55, 0.15))), 0.7);
         c.a *= 0.3;
       }
-      vec3 shaded = c.rgb * mix(1.0, shade, uReliefOnData) * dataNight;
+      vec3 shaded = c.rgb * mix(1.0, shadeData, uReliefOnData) * dataNight;
       colour = mix(colour, shaded, c.a * uOpacity);
     }
   } else if (uMode == 3) {
@@ -248,7 +261,7 @@ void main() {
     uint id = texelFetch(uCountries, px, 0).r;
     if (id > 0u) {
       vec4 c = texelFetch(uCountryColours, ivec2(int(id), 0), 0);
-      vec3 shaded = c.rgb * mix(1.0, shade, uReliefOnData) * dataNight;
+      vec3 shaded = c.rgb * mix(1.0, shadeData, uReliefOnData) * dataNight;
       colour = mix(colour, shaded, c.a * uOpacity);
     }
   }
@@ -296,6 +309,7 @@ export function createSurfaceMaterial() {
       uImagery: { value: blank() }, uImageryOn: { value: 0 },
       uLights: { value: blank() }, uLightsOn: { value: 0 },
       uDetail: { value: blank() }, uDetailBox: { value: new THREE.Vector4(0, 0, 1, 1) }, uDetailOn: { value: 0 },
+      uDetailKind: { value: 0 }, uShadeFlat: { value: 144 / 255 },
       uMode: { value: 0 },
       uA0: { value: empty() }, uA1: { value: empty() }, uB0: { value: empty() }, uB1: { value: empty() },
       uMix: { value: 0 }, uMixB: { value: 0 },

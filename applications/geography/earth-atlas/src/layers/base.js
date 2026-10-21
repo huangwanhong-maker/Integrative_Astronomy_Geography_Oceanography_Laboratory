@@ -6,7 +6,8 @@ import { baseImage } from '../render/relief.js';
 import { setBase, setCountryRaster } from '../render/surface.js';
 import { indexRaster } from '../core/raster.js';
 
-const RASTER = [4096, 2048];
+const RASTER = [4096, 2048];      // countries and seas, for looking up places
+const BASE = [8192, 4096];        // the painted base map: about 5 km to a pixel
 const OBLIQUITY = 23.4362;          // degrees, IAU 2006 value for 2026 (23.4393 - 0.013 T)
 
 export class BaseLayer {
@@ -33,10 +34,37 @@ export class BaseLayer {
     this.rebuild();
   }
 
+  // Paints the base map in a worker (src/workers/relief.worker.js), or here if
+  // workers are not available; resolves when the map is drawn.
   paint(elevation, style) {
-    const [W, H] = RASTER;
-    const { data } = baseImage({ elevation, geography: this.geo, coords: this.coords, width: W, height: H, style });
-    setBase(this.stage.material, new Uint8Array(data.buffer), W, H);
+    const [W, H] = BASE;
+    const ticket = (this.painting = {});
+    const L = this.geo.layers;
+    const job = {
+      layers: { land: L.land, lakes: L.lakes, glaciers: L.glaciers, ice_shelves: L.ice_shelves },
+      coords: this.coords.slice(),
+      elevation: elevation ? { meta: elevation.meta, codes: elevation.codes.slice() } : null,
+      width: W, height: H, style,
+    };
+    const done = (rgba) => { if (this.painting === ticket) setBase(this.stage.material, rgba, W, H); };
+    return new Promise((resolve) => {
+      let worker;
+      try {
+        worker = new Worker(new URL('../workers/relief.worker.js', import.meta.url), { type: 'module' });
+      } catch {
+        const { data } = baseImage({ elevation, geography: this.geo, coords: this.coords, width: W, height: H, style });
+        done(new Uint8Array(data.buffer));
+        resolve();
+        return;
+      }
+      worker.onmessage = (e) => {
+        worker.terminate();
+        if (e.data.rgba) done(e.data.rgba);
+        else console.error('relief:', e.data.error);
+        resolve();
+      };
+      worker.postMessage(job, [job.coords.buffer, ...(job.elevation ? [job.elevation.codes.buffer] : [])]);
+    });
   }
 
   // Lines in world coordinates for the current projection.
