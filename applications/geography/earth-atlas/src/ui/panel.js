@@ -120,6 +120,10 @@ export function buildPanel(el, catalogue, state, years, extra, on) {
     html.push(choice('lines', 'none', 'None', state.lines === 'none'));
     html.push(keyed('lines', byKey(catalogue.lines), state.lines));
   }
+  if (extra.plates) {
+    html.push('<h3>Solid Earth</h3>');
+    html.push(`<label class="check"><input type="checkbox" data-plates${state.plates ? ' checked' : ''}> Plate boundaries and names</label>`);
+  }
   if (catalogue.tracks.length) {
     html.push('<h3>Cyclones</h3>');
     for (const t of catalogue.tracks) {
@@ -195,6 +199,7 @@ export function buildPanel(el, catalogue, state, years, extra, on) {
   el.querySelectorAll('button[data-model]').forEach((b) => b.addEventListener('click', () => on[b.dataset.model](b.dataset.id)));
   const cmp = el.querySelector('select[data-compare]');
   if (cmp) cmp.addEventListener('change', () => on.compare(cmp.value || null));
+  el.querySelectorAll('input[data-plates]').forEach((i) => i.addEventListener('change', () => on.plates(i.checked)));
   el.querySelectorAll('input[data-track]').forEach((i) => i.addEventListener('change', () => on.track(i.dataset.track, i.checked)));
   el.querySelectorAll('input[data-events]').forEach((i) => i.addEventListener('change', () => on.events(i.checked ? i.dataset.events : null)));
   el.querySelectorAll('button[data-events-window]').forEach((b) => b.addEventListener('click', () => on.events(b.dataset.eventsWindow)));

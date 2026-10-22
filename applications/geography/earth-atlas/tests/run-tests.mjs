@@ -26,6 +26,7 @@ import { koppen, koppenQuantities, koppenGrid, KOPPEN_CODES, dryMonths, meanTemp
 import { ClassRaster } from '../src/core/grid.js';
 import { precipitationScale, climateDiagram } from '../src/ui/climate.js';
 import { inertialPeriodHours, flowToward, mixedLayerDepth, columnSampler, symmetricRange, atDepth } from '../src/core/ocean.js';
+import { NNR_MORVEL56, poleOf, omega, poleOfOmega, velocityAt, subtract, acrossStep, azimuth, morvelCode } from '../src/core/plates.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../../../..');
@@ -592,6 +593,66 @@ const random = seeded(20261022);
   const floor = columnSampler(times, depths, times.map(() => depths.map((z) => (z <= 100 ? 1 : null))));
   assert('ocean: nothing beneath the sea floor', Number.isNaN(floor(5 * 3600000, 140)) && floor(5 * 3600000, 90) === 1);
   check('ocean: a symmetric range for currents', Math.abs(symmetricRange([-0.33, 0.1, 0.25], { q: 1 }) - 0.4), 1e-12);
+}
+
+// ---- the motion of the tectonic plates ------------------------------------------------
+{
+  // NNR-MORVEL56 velocities (mm/yr, east and north) from the EarthScope (formerly UNAVCO)
+  // Plate Motion Calculator, model morvel56_2011, NNR frame, height 0; retrieved 2026-10-22.
+  const reference = [['PA', -155.5, 19.5, -61.24, 32.23], ['NA', -100, 40, -15.49, -7.67], ['EU', 10, 50, 17.60, 14.59], ['PS', 135, 20, -45.29, 16.58]];
+  let worst = 0;
+  for (const [code, lon, lat, e, n] of reference) {
+    const v = velocityAt(omega(poleOf(code)), lon, lat);
+    worst = Math.max(worst, Math.abs(v.east - e), Math.abs(v.north - n));
+  }
+  check('plates: velocities of four plates against the EarthScope calculator', worst, 0.006, 'mm/yr');
+  assert('plates: NNR-MORVEL56 has 56 plates, and PB2002 codes map to them', NNR_MORVEL56.length === 56
+    && morvelCode('AF') === 'nb' && morvelCode('NB') === 'NB' && poleOf('NB').name === 'North Bismarck' && poleOf('AF').name === 'Nubia');
+  // A pole recovered from its angular velocity.
+  const pole = poleOfOmega(omega({ lat: -63.58, lon: 114.70, rate: 0.651 }));
+  check('plates: a pole from its angular velocity', Math.abs(pole.lat + 63.58) + Math.abs(pole.lon - 114.70) + Math.abs(pole.rate - 0.651), 1e-12);
+  // Relative motion is the difference of angular velocities: v_B - v_A at every point.
+  const wA = omega(poleOf('PA')), wB = omega(poleOf('NA'));
+  const vr = velocityAt(subtract(wB, wA), -130, 45), va = velocityAt(wA, -130, 45), vb = velocityAt(wB, -130, 45);
+  check('plates: relative motion from the difference of angular velocities', Math.hypot(vr.east - (vb.east - va.east), vr.north - (vb.north - va.north)), 1e-12, 'mm/yr');
+  // Across a step heading north, the right-hand plate is to the east: moving east it opens the
+  // boundary; moving south it slides past right-laterally (as seen from either side).
+  const open = acrossStep({ east: 3, north: 0 }, 0), slide = acrossStep({ east: 0, north: -2 }, 0);
+  assert('plates: opening and right-lateral sliding by the conventions of Bird (2003)',
+    Math.abs(open.divergence - 3) < 1e-12 && Math.abs(open.rightLateral) < 1e-12 && Math.abs(slide.divergence) < 1e-12 && Math.abs(slide.rightLateral - 2) < 1e-12,
+    JSON.stringify([open, slide]));
+  check('plates: the azimuth of a step due east along the equator', Math.abs(azimuth(10, 0, 11, 0) - 90), 1e-9, '°');
+
+  const meta = resolve(products, 'plates-pb2002.json');
+  if (existsSync(meta)) {
+    const m = JSON.parse(readFileSync(meta, 'utf8'));
+    const b = readFileSync(resolve(products, m.file));
+    const coords = new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
+    const W = 1440, H = 720, raster = new Uint8Array(W * H);
+    m.plates.forEach((pl, i) => fillRings(coords, pl.rings, W, H, i + 1, raster));
+    const total = m.plates.reduce((sum, pl) => sum + featureAreaFraction(coords, pl.rings), 0);
+    assert('plates: the 52 plates of PB2002 tile the sphere: every cell a plate, areas summing to 4π',
+      raster.every((x) => x > 0) && Math.abs(total - 1) < 1e-5, `${raster.filter((x) => !x).length} cells unassigned; areas ${total}`);
+    // NNR-MORVEL56 on PB2002's boundaries, against Bird's classes and his own (PB2002) relative velocities.
+    const codes = m.plates.map((pl) => pl.code), classes = m.classes.map((c) => c.code);
+    const tally = { open: [0, 0], close: [0, 0], lateral: [0, 0] };
+    for (const [lo1, la1, lo2raw, la2, k, L, R, , birdOpen, birdLateral] of m.steps) {
+      let lo2 = lo2raw;
+      if (lo2 - lo1 > 180) lo2 -= 360; else if (lo1 - lo2 > 180) lo2 += 360;
+      const v = velocityAt(subtract(omega(poleOf(codes[R])), omega(poleOf(codes[L]))), (lo1 + lo2) / 2, (la1 + la2) / 2);
+      const x = acrossStep(v, azimuth(lo1, la1, lo2, la2));
+      const c = classes[k];
+      if (c === 'OSR' || c === 'CRB') { tally.open[1]++; if (x.divergence > 0) tally.open[0]++; }
+      if (c === 'SUB') { tally.close[1]++; if (x.divergence < 0) tally.close[0]++; }
+      if ((c === 'OTF' || c === 'CTF') && Math.abs(birdLateral) > 2) { tally.lateral[1]++; if (Math.sign(birdLateral) === Math.sign(x.rightLateral)) tally.lateral[0]++; }
+    }
+    const share = ([a2, n]) => a2 / n;
+    assert('plates: spreading ridges and rifts open (at least 99 %)', share(tally.open) >= 0.99, `${tally.open[0]} of ${tally.open[1]}`);
+    assert('plates: subduction zones close (at least 99 %)', share(tally.close) >= 0.99, `${tally.close[0]} of ${tally.close[1]}`);
+    assert('plates: transforms slip in the sense Bird (2003) gives (at least 98 %)', share(tally.lateral) >= 0.98, `${tally.lateral[0]} of ${tally.lateral[1]}`);
+  } else {
+    console.log('skip  plates: plates-pb2002 missing');
+  }
 }
 
 // ---- water in shaded relief ---------------------------------------------------------

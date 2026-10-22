@@ -90,7 +90,8 @@ export class FlowLayer {
   step() {
     if (!this.product || !this.sample || !this.particles) return;
     const s = this.stage, ps = this.particles;
-    const dt = PX_PER_FRAME / s.pixelsPerMetre();
+    // Particles move PX_PER_FRAME pixels a frame for one unit of the field, times the quantity's pace.
+    const dt = (PX_PER_FRAME * (this.def.pace || 1)) / s.pixelsPerMetre();
     ps.step(this.sample, dt, this.spawn || (this.spawn = s.spawner()));
     const proj = s.projector();
     const p = [0, 0, 0], q = [0, 0, 0];

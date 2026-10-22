@@ -68,6 +68,7 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) 330px; min-height: 0
   background: var(--text); box-shadow: 0 0 0 1px rgba(18, 13, 20, 0.8);
 }
 .label.ocean { font: italic 13px var(--serif); letter-spacing: 0.22em; color: rgba(205, 220, 245, 0.62); text-transform: none; }
+.label.plate { font: italic 600 12px var(--serif); letter-spacing: 0.13em; color: rgba(246, 210, 160, 0.92); text-shadow: var(--halo); }
 .label.sea { font: italic 11.5px var(--serif); letter-spacing: 0.04em; color: rgba(190, 208, 238, 0.66); }
 .label.country { font: 600 11px var(--serif); letter-spacing: 0.12em; color: rgba(250, 240, 246, 0.8); }
 .label.country.upper { text-transform: uppercase; }

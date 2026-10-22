@@ -81,6 +81,24 @@ export class Library {
     return this.classMaps.get(name);
   }
 
+  // A field product computed in the application, offered like one from the library.
+  addField(product) {
+    this.fieldMeta.set(product.meta.name, product.meta);
+    this.fields.set(product.meta.name, Promise.resolve(product));
+  }
+
+  // A plates product: the plates' outlines (rings of points) and their boundary steps, read once.
+  plates(name) {
+    if (!this.plateSets) this.plateSets = new Map();
+    const entry = this.list('plates').find((e) => !name || e.name === name);
+    if (!entry) return Promise.resolve(null);
+    if (!this.plateSets.has(entry.name)) {
+      this.plateSets.set(entry.name, json(`${this.base}/${entry.file}`)
+        .then(async (meta) => ({ meta, coords: new Float32Array(await binary(`${this.base}/${meta.file}`)) })));
+    }
+    return this.plateSets.get(entry.name);
+  }
+
   // A class product computed in the application, offered like one from the library.
   addClasses(raster) {
     this.classMeta.set(raster.meta.name, raster.meta);

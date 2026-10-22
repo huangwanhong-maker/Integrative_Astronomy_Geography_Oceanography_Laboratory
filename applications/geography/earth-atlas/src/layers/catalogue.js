@@ -62,9 +62,15 @@ const NORMALS = [
 // Names of series of class maps.
 const CLASS_SERIES = { 'koppen-geiger': 'Climate classes (Köppen–Geiger)' };
 
+// Vector quantities. `toward`: named by where they flow (currents, plates), not
+// where they come from (wind). `pace` scales how fast particles move on screen,
+// and `siPerUnit` converts the stored units to m/s, so that the legend can say
+// how much faster than real the particles go.
 const VECTORS = [
   { id: 'wind', standard: 'wind', label: 'Wind', colormap: 'orchid', range: [0, 25], ranges: { '850 hPa': [0, 35], '500 hPa': [0, 50], '250 hPa': [0, 80] } },
-  { id: 'current', standard: 'sea_water_velocity', label: 'Ocean current', colormap: 'orchid', range: [0, 1.5] },
+  { id: 'current', standard: 'sea_water_velocity', label: 'Ocean current', colormap: 'orchid', range: [0, 1.5], toward: true },
+  { id: 'plate', standard: 'plate_velocity', label: 'Plate motion', colormap: 'matter', reverse: true, range: [0, 100], toward: true,
+    pace: 0.12, siPerUnit: 1 / (1000 * 365.25 * 86400) },
 ];
 
 // Short names and units for World Bank indicators, by code.
@@ -156,11 +162,15 @@ export function buildCatalogue(library) {
       const id = `${known.id}${slug(level)}@${name}`;
       const label = `${known.label}${height(u)}`;
       const range = (known.ranges && known.ranges[level]) || known.range;
-      flows.push({ id, key: `${known.id}|${level}`, kind: 'vector', label, model, product: name, variables: [vec.u, vec.v], domain, units: u.units, source: source(meta) });
+      flows.push({ id, key: `${known.id}|${level}`, kind: 'vector', label, model, product: name, variables: [vec.u, vec.v], domain, units: u.units, source: source(meta),
+        pace: known.pace || 1, siPerUnit: known.siPerUnit || 1 });
       surfaces.push({ id: `${id}:speed`, key: `speed:${known.id}|${level}`, kind: 'field', label: `${known.label} speed${height(u)}`, model, product: name, variables: [vec.u, vec.v], domain, units: u.units, level,
-        style: { colormap: known.colormap, range, scale: 'linear' }, source: source(meta) });
+        style: { colormap: known.colormap, reverse: known.reverse, range, scale: 'linear' }, source: source(meta) });
       taken.add(vec.u); taken.add(vec.v);
-      probes.push({ kind: 'vector', label: `${known.label}${height(u)}`, model, product: name, variables: [vec.u, vec.v], units: u.units, domain, key: `${known.id}|${level}` });
+      // The plates' own rows in the place card describe their motion.
+      if (known.id !== 'plate') {
+        probes.push({ kind: 'vector', label: `${known.label}${height(u)}`, model, product: name, variables: [vec.u, vec.v], units: u.units, domain, key: `${known.id}|${level}`, toward: Boolean(known.toward) });
+      }
     }
     const dir = meta.variables.find((v) => v.standard_name === 'sea_surface_wave_from_direction_at_variance_spectral_density_maximum');
     const per = meta.variables.find((v) => v.standard_name === 'sea_surface_wave_period_at_variance_spectral_density_maximum');

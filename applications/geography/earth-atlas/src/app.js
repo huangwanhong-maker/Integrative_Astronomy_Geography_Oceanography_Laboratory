@@ -16,6 +16,7 @@ import { FlowLayer } from './layers/flow.js';
 import { LinesLayer } from './layers/lines.js';
 import { EventsLayer } from './layers/events.js';
 import { TracksLayer } from './layers/tracks.js';
+import { PlatesLayer, MOTION_PRODUCT } from './layers/plates.js';
 import { ImageryLayer, DetailLayer } from './layers/imagery.js';
 import { LabModel, modelInputs, LAB_MODELS } from './layers/labmodel.js';
 import { setClouds } from './render/surface.js';
@@ -26,6 +27,7 @@ import { buildPanel } from './ui/panel.js';
 import { toVector } from './core/sphere.js';
 import { subsolarPoint, sunAltAz, daylight, localMeanSolarTime } from './core/sun.js';
 import { windFromDirection, compassPoint } from './core/derived.js';
+import { flowToward } from './core/ocean.js';
 import { displayUnit, toShown, format } from './core/units.js';
 import { areaMean, ClassRaster } from './core/grid.js';
 import { koppen, koppenGrid, meanTemperature } from './core/climate.js';
@@ -39,7 +41,7 @@ const HOUR = 3600000, DAY = 86400000;
 
 const state = {
   projection: 'globe',
-  surface: null, compare: null, flow: null, lines: 'none', events: null, indicator: null, tracks: [],
+  surface: null, compare: null, flow: null, lines: 'none', events: null, indicator: null, tracks: [], plates: false,
   style: 'relief', night: true, lights: true, clouds: false,
   coast: true, borders: true, rivers: true, graticule: false, labels: true, reliefOnData: true,
   lang: 'en',
@@ -48,7 +50,7 @@ const state = {
 };
 
 let library, catalogue, stage, base, surface, flow, lines, events, labels, timeline, geography, elevation, tracks;
-let imagery, detail, labModel, detailSource = null, ocean;
+let imagery, detail, labModel, detailSource = null, ocean, plates;
 const lab = { input: null, running: null, progress: 0, runs: {}, start: null, against: '', error: '' };
 const MODEL_COLOURS = ['#CA8DBE', '#f6c47e', '#9fb6e8', '#8fd1b4', '#e8a0a0'];
 const loaded = new Map();          // field products in memory, by name
@@ -93,6 +95,9 @@ async function start() {
   progress(0.2, 'Drawing the map…');
   stage = new Stage($('gl'));
   base = new BaseLayer(stage, geography);
+  // The plates and their motion, a field computed here, before the catalogue is built.
+  plates = new PlatesLayer(stage, library);
+  try { await plates.load(); } catch (e) { console.error('plates', e); }
   catalogue = buildCatalogue(library);
   restore();
   chooseDefaults();
@@ -135,12 +140,13 @@ async function start() {
   applyBase('style');
   applyBase('lights');
   if (state.clouds) applyBase('clouds');
+  plates.show(state.plates);
   setProjection(state.projection, true);
   setTime(state.live ? Date.now() : state.time);
   renderPanel();
   $('loading').hidden = true;
   // For inspection from the browser's console and for automated checks.
-  window.atlas = { state, stage, base, surface, flow, lines, events, library, catalogue: () => catalogue, labels, imagery, detail, lab, runLab, ocean,
+  window.atlas = { state, stage, base, surface, flow, lines, events, library, catalogue: () => catalogue, labels, imagery, detail, lab, runLab, ocean, plates,
     select: { surface: (id) => selectSurface(id), compare: (id) => selectCompare(id), flow: (id) => selectFlow(id), lines: (id) => selectLines(id) } };
   requestAnimationFrame(loop);
 
@@ -283,6 +289,7 @@ function renderPanel() {
     clouds: catalogue.clouds.length > 0,
     lab: lab.input ? lab : null,
     modelColour,
+    plates: Boolean(plates && plates.plates),
     ai: [...library.fieldMeta.values()].filter((m) => m.verification && m.verification.start).map((m) => ({
       label: m.model, short: m.model.replace(/ \(laboratory\)$/, '').replace(/ hindcast$/, ''),
       start: Date.parse(m.verification.start), leads: m.verification.leads,
@@ -296,6 +303,7 @@ function renderPanel() {
     lines: (id) => selectLines(id),
     events: (id) => selectEvents(id),
     track: (id, on) => selectTracks(on ? [...state.tracks, id] : state.tracks.filter((x) => x !== id)),
+    plates: (on) => { state.plates = on; plates.show(on); dirty.labels = dirty.legend = true; remember(); },
     year: (step) => {
       const p = surface.product;
       if (!p || !p.years) return;
@@ -347,6 +355,7 @@ function setProjection(mode, initial = false) {
   events.update(state.time, true);
   tracks.rebuild();
   tracks.update(state.time, true);
+  if (plates.built) plates.rebuild();
   dirty.labels = true;
   remember();
 }
@@ -557,8 +566,9 @@ function formatProbe(probe, r) {
   const unit = probeUnit(probe);
   if (probe.kind === 'vector') {
     if (!Number.isFinite(r.speed)) return null;
-    const from = windFromDirection(r.u, r.v);
-    const dir = Number.isFinite(from) ? ` <span class="dir">from ${compassPoint(from)}</span>` : '';
+    // Wind is named by where it comes from; currents by where they flow.
+    const angle = probe.toward ? flowToward(r.u, r.v) : windFromDirection(r.u, r.v);
+    const dir = Number.isFinite(angle) ? ` <span class="dir">${probe.toward ? 'toward' : 'from'} ${compassPoint(angle)}</span>` : '';
     return `${format(toShown(r.speed, unit))} ${esc(unit.unit)}${dir}`;
   }
   if (!Number.isFinite(r.value)) return null;
@@ -690,6 +700,8 @@ function placeCard() {
   }
   const climate = climateAt(lon, lat);
   for (const [term, html, kind] of climate.rows) add('climate', term, html, kind);
+  // The solid Earth: the plate, its motion, and the nearest plate boundary.
+  for (const [term, html, kind] of plates.rows(lon, lat)) add('geophysics', term, html, kind);
   // The ocean beneath: currents and temperature by depth, asked for on demand.
   for (const [term, html, kind] of ocean.rows(lon, lat, t, seaFloorAt(lon, lat))) add('oceanography', term, html, kind);
   const palette = [...models].sort((a, b) => modelRank(a) - modelRank(b));
@@ -789,13 +801,18 @@ function legendData() {
     out.surface = lg;
   }
   if (flow.def && flow.product) {
-    const realPerFrame = 0.16 / stage.pixelsPerMetre();
-    const factor = realPerFrame * 60;
+    // Screen speed (m/s of the Earth's surface) for one unit of the field, against its real speed in m/s.
+    const realPerFrame = (0.16 * (flow.def.pace || 1)) / stage.pixelsPerMetre();
+    const factor = (realPerFrame * 60) / (flow.def.siPerUnit || 1);
     const b = flow.product.bracket(state.time);
-    const speed = Math.round(factor / 1000) * 1000;
+    // A large factor as a power of ten: plates move a few centimetres a year.
+    const SUP = { '-': '⁻', 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹' };
+    const e = Math.floor(Math.log10(factor));
+    const times = factor < 1e7 ? (Math.round(factor / 1000) * 1000).toLocaleString('en-GB')
+      : `${(factor / 10 ** e).toFixed(1)} × 10${String(e).split('').map((c) => SUP[c]).join('')}`;
     out.flow = {
       title: flow.def.label,
-      note: `${flow.def.kind === 'waves' ? 'At the group speed g T / 4π, ' : ''}shown ${speed.toLocaleString('en-GB')} times faster than real`,
+      note: `${flow.def.kind === 'waves' ? 'At the group speed g T / 4π, ' : ''}shown ${times} times faster than real`,
       offset: b.offset && Math.abs(b.offset) > HOUR ? `Data from ${formatOffset(b.offset)}` : '',
     };
   }
@@ -803,6 +820,7 @@ function legendData() {
     const step = lines.def.step * displayUnit(lines.def.units, lines.def.labelUnits).a;
     out.lines = { title: lines.def.label, unit: `every ${+step.toPrecision(3)} ${lines.def.labelUnits}` };
   }
+  if (state.plates && plates.plates) out.plates = plates.legend();
   if (tracks.sources.length) {
     const keys = tracks.sources.flatMap((s) => (s.def.kind === 'official'
       ? [{ label: 'observed', colour: s.colour }, { label: 'official forecast', colour: s.colour, dashed: true }]
@@ -842,6 +860,7 @@ function updateCredits() {
   }
   if (events.product) credits.add(events.product.source.credit);
   for (const s of tracks.sources) if (s.def.kind === 'official' && s.def.source) credits.add(s.def.source.credit);
+  if (state.plates && plates.meta) credits.add(plates.meta.source.credit);
   $('credits').textContent = [...credits].filter(Boolean).join(' · ');
 }
 
@@ -870,6 +889,7 @@ function updateLabels() {
     const html = `${name}${c.pressures.length ? `<small>${c.pressures.join(' ')}</small>` : ''}`;
     if (html) items.push({ key: `tc${key}`, text: html, html, lon: c.at.lon, lat: c.at.lat, className: 'cyclone', font: '600 12px serif', size: 18, always: true });
   }
+  items.push(...plates.labelItems(stage.zoomLevel()));
   if (state.labels) items.push(...base.labelItems(stage.zoomLevel(), state.lang));
   labels.update(items, (lon, lat) => stage.screen(lon, lat), stage.width, stage.height);
 }
@@ -895,6 +915,7 @@ function renderAbout() {
   }
   if (lab.input) rows.push(`<dt>Laboratory models</dt><dd>Two models of the flow at 500 hPa, solved by the spectral transform method at triangular truncation T42 (a Gaussian grid of 128 × 64) with fourth-order Runge–Kutta steps. The barotropic vorticity equation, as in the first numerical forecast (Charney, Fjørtoft and von Neumann 1950), starts from the wind of the GFS, in steps of 30 min; heights follow by linear balance and are added, as changes, to the analysed height. The shallow-water equations start from its wind and height, in steps of 15 min, after a digital filter over six hours removes the gravity waves of an unbalanced start (Lynch and Huang 1992); their finite radius of deformation slows the longest waves, which the barotropic model moves westward too fast. Tested against the Rossby–Haurwitz wave, Williamson et al.'s steady flow across the poles, and gravity waves of known period.</dd>`);
   if (catalogue.normals.length) rows.push(`<dt>Climate</dt><dd>Climate classes follow Köppen (1936) as revised by Peel et al. (2007) and Beck et al. (2018): the arid group first, then the tropical, polar, temperate and cold groups, with summer the warmer half-year. Besides the published maps, the atlas classifies the ${esc(catalogue.normals[0].model)} normals itself, with the mean temperature of a month taken as the mean of its daily maximum and minimum; the two agree in about nine land cells in ten. Climate diagrams follow Walter and Lieth (1960): 10 °C to 20 mm, dry where precipitation falls below twice the temperature (Gaussen).</dd>`);
+  if (plates.meta) rows.push(`<dt>Tectonic plates</dt><dd>The outlines of 52 plates and the classes of their boundaries are Bird's model PB2002 (as converted by H. Ahlenius, Nordpil; ODC Attribution licence). Each plate turns rigidly about its pole, at the rate of NNR-MORVEL56 (Argus, Gordon and DeMets 2011), relative to the no-net-rotation frame, the mean motion of the whole surface: a point moves at ω × r, computed here on the WGS 84 ellipsoid. Bird's Africa takes MORVEL's Nubia; MORVEL's Capricorn, Lwandle, Macquarie and Sur, which PB2002 does not outline, move with the plates containing them. Across a boundary the relative motion is resolved into opening (or closing) and sliding, right- or left-lateral. <i>Bird, P. (2003), G-cubed 4(3), 1027; Argus, D. F., Gordon, R. G. and DeMets, C. (2011), G-cubed 12, Q11001.</i></dd>`);
   rows.push(`<dt>The ocean beneath a place</dt><dd>Asked for on demand, through this atlas's server and the laboratory's data library, from the US Navy's global ocean model (ESPC-D-V02, its ocean HYCOM on a 1/12° grid with 40 levels to 5000 m) on HYCOM.org's OPeNDAP server: the column at the model's grid point nearest the place, every 6 hours from two days back to four ahead. Approved for public release, distribution unlimited; HYCOM was developed with funding from the National Ocean Partnership Program and the Office of Naval Research, and its data-assimilative products are funded by the U.S. Navy. <i>Barton, N., et al. (2021), The Navy's Earth System Prediction Capability, Earth and Space Science 8, e2020EA001199.</i> The mixed layer is where temperature first differs from that at 10 m by 0.2 °C (de Boyer Montégut et al. 2004).</dd>`);
   rows.push(`<dt>Method</dt><dd>Fields are interpolated bilinearly in space and linearly in time between the stored steps; a place near missing values takes the mean of the valid neighbours carrying at least half the weight. Wind direction is the direction it comes from. Wave energy travels at the deep-water group speed g T / 4π along the peak direction. The Sun's position follows the Astronomical Almanac's low-precision formulas (0.01°); day, civil, nautical and astronomical twilight are drawn as bands. Countries are joined to indicators by their World Bank and ISO codes; boundaries are Natural Earth's de facto depiction. The Equal Earth projection keeps areas true.</dd>`);
   $('about-body').innerHTML = `<dl>${rows.join('')}</dl>`;
@@ -966,6 +987,7 @@ function remember() {
     if (state.clouds) q.set('cl', '1');
     if (state.events) q.set('e', state.events);
     if (state.tracks.length) q.set('k', state.tracks.join(' '));
+    if (state.plates) q.set('pb', '1');
     if (!state.live) q.set('t', new Date(state.time).toISOString().slice(0, 16) + 'Z');
     if (state.pinned) q.set('at', `${state.pinned[0].toFixed(3)},${state.pinned[1].toFixed(3)}`);
     if (state.lang !== 'en') q.set('lang', state.lang);
@@ -987,6 +1009,7 @@ function restore() {
   for (const [k, key] of [['s', 'surface'], ['f', 'flow'], ['l', 'lines'], ['e', 'events'], ['m', 'compare']]) if (q.get(k)) state[key] = q.get(k);
   if (q.get('nl') === '0') state.lights = false;
   if (q.get('k')) state.tracks = q.get('k').split(' ').filter(Boolean);
+  if (q.get('pb') === '1') state.plates = true;
   if (q.get('cl') === '1') state.clouds = true;
   if (q.get('t')) { const t = Date.parse(q.get('t')); if (Number.isFinite(t)) { state.time = t; state.live = false; } }
   if (q.get('at')) { const a = q.get('at').split(',').map(Number); if (a.every(Number.isFinite)) state.pinned = a; }
@@ -1024,7 +1047,7 @@ function loop(now) {
   if ((detail.target || 0) !== lastDetailTarget) { lastDetailTarget = detail.target || 0; dirty.legend = true; }
   if (dirty.labels) { dirty.labels = false; flow.viewChanged(); updateLabels(); }
   const res = stage.resolution;
-  base.frame(res); flow.frame(res); lines.frame(res); events.frame(res); tracks.frame(res);
+  base.frame(res); flow.frame(res); lines.frame(res); events.frame(res); tracks.frame(res); plates.frame(res);
   stage.render();
   if (dirty.legend) { dirty.legend = false; renderLegend($('legend'), legendData()); updateCredits(); }
   if (dirty.place && now - lastPlace > (state.playing ? 400 : 120)) {
