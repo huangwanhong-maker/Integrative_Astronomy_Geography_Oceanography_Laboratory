@@ -24,23 +24,43 @@ export class MechanismsLayer {
     this.drawn = [];
   }
 
+  // Reads the catalogue once; true if there is one.
+  async load() {
+    if (this.product) return true;
+    const entry = this.library.list('events').find((e) => e.kind === 'mechanism');
+    if (!entry) return false;
+    if (!this.loading) this.loading = this.library.eventSet(entry.name).then((p) => this.prepare(p));
+    await this.loading;
+    return true;
+  }
+
   async show(on) {
     this.shown = on;
-    if (on && !this.product) {
-      const entry = this.library.list('events').find((e) => e.kind === 'mechanism');
-      if (!entry) { this.shown = false; return; }
-      this.product = await this.library.eventSet(entry.name);
-      this.f = Object.fromEntries(this.product.fields.map((k, i) => [k, i]));
-      const f = this.f;
-      // Each event's tensor (north, east, down) and class, computed once.
-      this.events = this.product.events.map((r) => {
-        const el = { mrr: r[f.mrr], mtt: r[f.mtt], mpp: r[f.mpp], mrt: r[f.mrt], mrp: r[f.mrp], mtp: r[f.mtp] };
-        return { row: r, t: r[f.time_ms], mw: r[f.mw], lon: r[f.lon], lat: r[f.lat], m: tensorNED(el), elements: el, kind: null };
-      });
-      this.times = this.events.map((e) => e.t);
-    }
+    if (on && !(await this.load())) this.shown = false;
     this.balls.mesh.visible = this.shown && Boolean(this.product);
     this.stale = true;
+  }
+
+  prepare(product) {
+    this.product = product;
+    this.f = Object.fromEntries(product.fields.map((k, i) => [k, i]));
+    const f = this.f;
+    // Each event's tensor (north, east, down), computed once; its class when first needed.
+    this.events = product.events.map((r) => {
+      const el = { mrr: r[f.mrr], mtt: r[f.mtt], mpp: r[f.mpp], mrt: r[f.mrt], mrp: r[f.mrp], mtp: r[f.mtp] };
+      return { row: r, t: r[f.time_ms], mw: r[f.mw], lon: r[f.lon], lat: r[f.lat], m: tensorNED(el), elements: el, kind: null };
+    });
+    this.times = this.events.map((e) => e.t);
+  }
+
+  // Every event as the section figure wants it.
+  all() {
+    if (!this.events) return [];
+    const f = this.f;
+    return this.events.map((e) => {
+      if (!e.kind) e.kind = mechanism(e.elements).kind;
+      return { lon: e.lon, lat: e.lat, depth: e.row[f.depth_km], mw: e.mw, kind: e.kind, t: e.t, name: e.row[f.region] };
+    });
   }
 
   setMode(mode) { this.mode = mode; this.stale = true; }

@@ -24,6 +24,9 @@ import { stereonet } from './ui/stereonet.js';
 import { arcDeg } from './core/cyclones.js';
 import { cellIndex, column as crustColumn } from './core/crust.js';
 import { crustDiagram } from './ui/crust.js';
+import { SectionFigure } from './ui/section.js';
+import { sectionLine } from './core/section.js';
+import { SegmentLayer, polylineSegments } from './render/segments.js';
 import { SeriesFigure } from './ui/series.js';
 import { Requests } from './data/requests.js';
 import { ImageryLayer, DetailLayer } from './layers/imagery.js';
@@ -61,7 +64,7 @@ const state = {
 };
 
 let library, catalogue, stage, base, surface, flow, lines, events, labels, timeline, geography, elevation, tracks;
-let imagery, detail, labModel, detailSource = null, ocean, plates, stations, series, mechanisms, crust = null;
+let imagery, detail, labModel, detailSource = null, ocean, plates, stations, series, mechanisms, crust = null, section, sectionLayer;
 const asked = new Requests();       // data requested on demand for the place card, other than the ocean's
 const lab = { input: null, running: null, progress: 0, runs: {}, start: null, against: '', error: '' };
 const MODEL_COLOURS = ['#CA8DBE', '#f6c47e', '#9fb6e8', '#8fd1b4', '#e8a0a0'];
@@ -141,6 +144,15 @@ async function start() {
   stations.setMode(state.stationFrame);
   mechanisms = new MechanismsLayer(stage, library);
   mechanisms.setMode(state.mechanismMode);
+  // The section figure, and its line on the map while it is open.
+  sectionLayer = new SegmentLayer({ color: '#f6c47e', width: 2, opacity: 0.95, order: 6 });
+  stage.overlay.add(sectionLayer.mesh);
+  section = new SectionFigure($('section'), {
+    quakes: () => mechanisms.all(),
+    elevation: (lon, lat) => (elevation ? elevation.sample(elevation.meta.variables[0].name, 0, lon, lat) : NaN),
+    crust: (lon, lat) => crustAt(lon, lat),
+    crossings: (points) => plates.crossings(points),
+  }, { onChange: drawSectionLine });
   series = new SeriesFigure($('series'));
 
   progress(0.5, 'Reading the forecast…');
@@ -393,6 +405,7 @@ function setProjection(mode, initial = false) {
   tracks.rebuild();
   tracks.update(state.time, true);
   if (plates.built) plates.rebuild();
+  drawSectionLine();
   stations.stale = true;
   mechanisms.stale = true;
   dirty.labels = true;
@@ -498,6 +511,7 @@ function bind() {
       ocean.show(state.pinned[0], state.pinned[1], state.time, seaFloorAt(state.pinned[0], state.pinned[1]));
     }
     if (e.target.closest('[data-action="station-series"]') && state.station) showStationSeries(state.station);
+    if (e.target.closest('[data-action="section"]') && state.pinned) openSection(state.pinned[0], state.pinned[1]);
   });
   stage.on('hover', (place, e) => {
     if (!place || !e) { hover = null; $('tooltip').hidden = true; return; }
@@ -773,10 +787,8 @@ function placeCard() {
   // The crust beneath, from CRUST1.0: its layers to the Moho.
   let crustFigure = null;
   if (crust) {
-    const g = crust.meta.grid, cell = cellIndex(g, lon, lat), n = g.nlon * g.nlat;
-    const q = Object.fromEntries(crust.meta.quantities.map((x) => [x.name, x]));
-    const c = crustColumn((name, k) => crust.values[q[name].offsets[k] / 2 + cell] * q[name].scale);
-    if (Number.isFinite(c.moho) && cell < n) {
+    const c = crustAt(lon, lat);
+    if (c) {
       add('geophysics', 'The crust beneath', `${c.crust.toFixed(1)} km thick <span class="dir">${c.oceanic ? 'oceanic' : 'continental'}</span>`);
       add('geophysics', 'Moho', `${c.moho.toFixed(1)} km below sea level`);
       if (c.sediments > 0.05) add('geophysics', 'Sediments', `${c.sediments.toFixed(1)} km`);
@@ -793,6 +805,9 @@ function placeCard() {
     }
   }
   for (const [term, html, kind] of plates.rows(lon, lat)) add('geophysics', term, html, kind);
+  if (plates.plates && library.list('events').some((e) => e.kind === 'mechanism')) {
+    add('geophysics', 'Through the Earth', '<button type="button" class="action" data-action="section">A section through here</button>');
+  }
   // The ocean beneath: currents and temperature by depth, asked for on demand.
   for (const [term, html, kind] of ocean.rows(lon, lat, t, seaFloorAt(lon, lat))) add('oceanography', term, html, kind);
   const palette = [...models].sort((a, b) => modelRank(a) - modelRank(b));
@@ -824,6 +839,33 @@ function placeCard() {
     series,
     models: palette.length > 1 ? palette.map((m, i) => ({ model: m, colour: MODEL_COLOURS[i % MODEL_COLOURS.length] })) : null,
   };
+}
+
+// The crust at a place from CRUST1.0, or null.
+function crustAt(lon, lat) {
+  if (!crust) return null;
+  const g = crust.meta.grid, cell = cellIndex(g, lon, lat);
+  const q = Object.fromEntries(crust.meta.quantities.map((x) => [x.name, x]));
+  const c = crustColumn((name, k) => crust.values[q[name].offsets[k] / 2 + cell] * q[name].scale);
+  return Number.isFinite(c.moho) ? c : null;
+}
+
+// A section through the Earth at a place: across the nearest plate boundary.
+async function openSection(lon, lat) {
+  await mechanisms.load();
+  ocean.figure.hide(); series.hide();
+  section.show(plates.sectionAt(lon, lat));
+}
+
+// The section's line on the map, with the edges of its band, while it is open.
+function drawSectionLine() {
+  if (!section || !section.open) { sectionLayer.clear(); return; }
+  const proj = stage.projector();
+  const lift = (lon, lat, out) => proj.project(lon, lat, out, 1.0022);
+  const pts = sectionLine(section.lon, section.lat, section.az, section.half, 20);
+  const coords = new Float32Array(pts.flatMap((p) => [p.lon, p.lat]));
+  const seg = polylineSegments(coords, [[0, pts.length]], lift, proj.breaks, { subdivide: 0.5 });
+  sectionLayer.set(seg.a, seg.b, seg.info);
 }
 
 // The daily positions of a GPS station, asked for on demand, then drawn.
@@ -1183,6 +1225,7 @@ function loop(now) {
   if (dirty.labels) { dirty.labels = false; flow.viewChanged(); updateLabels(); }
   const res = stage.resolution;
   base.frame(res); flow.frame(res); lines.frame(res); events.frame(res); tracks.frame(res); plates.frame(res); stations.frame(res); mechanisms.frame(res);
+  sectionLayer.frame(res, 0);
   stage.render();
   if (dirty.legend) { dirty.legend = false; renderLegend($('legend'), legendData()); updateCredits(); }
   if (dirty.place && now - lastPlace > (state.playing ? 400 : 120)) {

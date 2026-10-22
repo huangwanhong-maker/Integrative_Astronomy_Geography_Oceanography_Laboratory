@@ -16,6 +16,7 @@ import { poleOf, omega, velocityAt, subtract, acrossStep, azimuth, inRings, morv
 import { arcDeg } from '../core/cyclones.js';
 import { compassPoint } from '../core/derived.js';
 import { flowToward } from '../core/ocean.js';
+import { travel as offsetAlong, relativeTo } from '../core/section.js';
 
 export const MOTION_PRODUCT = 'plate-motion-nnr-morvel56';
 export const GROUPS = [
@@ -237,6 +238,43 @@ export class PlatesLayer {
     const mlat = (lat1 + lat2) / 2;
     const v = velocityAt(subtract(R.omega, L.omega), mlon, mlat);
     return { left: L, right: R, v, ...acrossStep(v, azimuth(lon1, lat1, lon2, lat2)) };
+  }
+
+  // Where a line of samples [{ s, lon, lat }] crosses plate boundaries: [{ s, label, colour }].
+  crossings(points) {
+    const out = [];
+    for (let i = 1; i < points.length; i++) {
+      const a = this.plateFromRaster(points[i - 1].lon, points[i - 1].lat), b = this.plateFromRaster(points[i].lon, points[i].lat);
+      if (!a || !b || a === b) continue;
+      const lon = (points[i - 1].lon + points[i].lon) / 2, lat = (points[i - 1].lat + points[i].lat) / 2;
+      const near = this.nearestStep(lon, lat);
+      const code = near ? this.classes[near.step[4]] : null;
+      const group = GROUPS.find((g) => g.classes.includes(code)) || GROUPS[1];
+      out.push({ s: (points[i - 1].s + points[i].s) / 2, label: code ? this.meta.classes[near.step[4]].name : `${a.name} | ${b.name}`, colour: group.colour });
+    }
+    return out;
+  }
+
+  // A section across the nearest boundary: perpendicular to it, toward the
+  // overriding plate at a subduction zone (so that the sinking plate dips to
+  // the right), from 400 km before the boundary to 1,200 km beyond; else east
+  // through the place. { lon, lat, az, half, why, mark }.
+  sectionAt(lon, lat) {
+    const near = this.plates ? this.nearestStep(lon, lat) : null;
+    if (!near || near.km > 900) return { lon, lat, az: 90, half: 700, why: 'east–west through the place chosen', mark: 0 };
+    const [lon1, lat1, lon2, lat2, k, , , over] = near.step;
+    let l2 = lon2;
+    if (l2 - lon1 > 180) l2 -= 360; else if (lon1 - l2 > 180) l2 += 360;
+    const az = azimuth(lon1, lat1, lon2, lat2);
+    const code = this.classes[k];
+    const across = code === 'SUB' && over === 1 ? az - 90 : az + 90;      // toward the overriding plate
+    const mlon = (lon1 + l2) / 2, mlat = (lat1 + lat2) / 2;
+    // The centre 400 km beyond the boundary, so that the section runs from 400 km before it to 1,200 km after.
+    const centre = offsetAlong(mlon, mlat, across, 400);
+    const name = this.meta.classes[k].name;
+    const rel = relativeTo(centre[0], centre[1], (across + 360) % 360, lon, lat);
+    return { lon: centre[0], lat: centre[1], az: (across + 360) % 360, half: 800, mark: rel.along,
+      why: code === 'SUB' ? `across the ${name}, toward the overriding plate` : `across the nearest boundary, a ${name}` };
   }
 
   // Rows for the place card: [term, html, kind].

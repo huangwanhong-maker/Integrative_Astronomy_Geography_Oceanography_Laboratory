@@ -28,6 +28,8 @@ import { precipitationScale, climateDiagram } from '../src/ui/climate.js';
 import { inertialPeriodHours, flowToward, mixedLayerDepth, columnSampler, symmetricRange, atDepth } from '../src/core/ocean.js';
 import { NNR_MORVEL56, poleOf, omega, poleOfOmega, velocityAt, subtract, acrossStep, azimuth, morvelCode, itrfOmega, itrfVelocityAt } from '../src/core/plates.js';
 import { mechanism, tensorNED, eigenSymmetric, radiation, fromEqualArea, toEqualArea, planeDifference } from '../src/core/moment.js';
+import { cellIndex, column as crustColumn } from '../src/core/crust.js';
+import { travel, relativeTo, sectionLine, R_KM } from '../src/core/section.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../../../..');
@@ -750,6 +752,51 @@ const random = seeded(20261022);
       mt.kind === 'thrust' && Math.abs(tohoku[f.mw] - 9.08) < 0.01 && planeDifference(mt.planes[0], { strike: 203, dip: 10 }) < 1, JSON.stringify(mt.planes[0]));
   } else {
     console.log('skip  mechanisms: events-gcmt missing');
+  }
+}
+
+// ---- the crust, and sections through the Earth ----------------------------------------
+{
+  // A constructed oceanic column: 4 km of water, 0.5 km of sediment, 7 km of crust (no ice,
+  // no middle or lower sediments, no middle crust).
+  const tops = [0, -4, -4, -4.5, -4.5, -4.5, -6, -6, -11.5];
+  const vp = [1.5, 0, 2, 0, 0, 5, 0, 7, 8.1];
+  const c = crustColumn((q, k) => (q === 'top' ? tops[k] : q === 'vp' ? vp[k] : 0));
+  assert('crust: a constructed oceanic column, layer by layer',
+    c.layers.map((l) => l.name).join(',') === 'water,upper sediments,upper crystalline crust,lower crystalline crust'
+    && Math.abs(c.moho - 11.5) < 1e-12 && Math.abs(c.crust - 7.5) < 1e-12 && Math.abs(c.sediments - 0.5) < 1e-12 && c.oceanic,
+    JSON.stringify({ layers: c.layers.map((l) => [l.name, l.thickness]), moho: c.moho, crust: c.crust }));
+  const g = { lon0: -179.5, dlon: 1, nlon: 360, lat0: 89.5, dlat: 1, nlat: 180 };
+  assert('crust: the 1° cell containing a place (its corners and the antimeridian)',
+    cellIndex(g, -180, 90) === 0 && cellIndex(g, 179.99, -89.99) === 360 * 180 - 1 && cellIndex(g, 0.5, 0.5) === 89 * 360 + 180 && cellIndex(g, 180, 0) === cellIndex(g, -180, 0));
+  // Sections: a place 80 km to the right of a line, 400 km along it, is found there; one behind
+  // the start has a negative distance along; a half-circumference closes the sphere.
+  const lineAz = 100, [x1, y1] = travel(140, 38, lineAz, 400);
+  // The line's direction there: the reverse of the azimuth back to its start.
+  const local = azimuth(x1, y1, 140, 38) + 180;
+  const [x2, y2] = travel(x1, y1, local + 90, 80);
+  const r1 = relativeTo(140, 38, lineAz, x2, y2);
+  const [x3, y3] = travel(140, 38, lineAz + 180, 250);
+  const r2 = relativeTo(140, 38, lineAz, x3, y3);
+  check('sections: along- and across-track distances of a place beside the line', Math.abs(r1.along - 400) + Math.abs(r1.across - 80) + Math.abs(r2.along + 250) + Math.abs(r2.across), 1e-6, 'km');
+  const ends = sectionLine(0, 0, 90, Math.PI * R_KM / 2, Math.PI * R_KM / 2);
+  assert('sections: a half circumference from 90° W to 90° E along the equator', ends.length === 3
+    && Math.abs(ends[0].lon + 90) < 1e-9 && Math.abs(ends[2].lon - 90) < 1e-9 && Math.abs(ends[1].lon) < 1e-9);
+  const cm = resolve(products, 'crust-crust1.json');
+  if (existsSync(cm)) {
+    const meta = JSON.parse(readFileSync(cm, 'utf8'));
+    const buf = readFileSync(resolve(products, meta.file));
+    const values = new Int16Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+    const q = Object.fromEntries(meta.quantities.map((x) => [x.name, x]));
+    const at = (lon, lat) => { const cell = cellIndex(meta.grid, lon, lat); return crustColumn((name, k) => values[q[name].offsets[k] / 2 + cell] * q[name].scale); };
+    const tibet = at(91.1, 29.65), pacific = at(-150, 10), shield = at(-100, 55);
+    assert('crust: Tibet over 60 km thick; the central Pacific oceanic, its Moho 10 to 14 km below sea level; the Canadian Shield 35 to 45 km',
+      tibet.crust > 60 && pacific.oceanic && pacific.moho > 10 && pacific.moho < 14 && shield.crust > 35 && shield.crust < 45 && !shield.oceanic,
+      JSON.stringify({ tibet: tibet.crust, pacific: pacific.moho, shield: shield.crust }));
+    assert('crust: P waves quicken to 7.6-8.4 km/s beneath the Moho everywhere checked (Pn)',
+      [tibet, pacific, shield].every((x) => x.mantle.vp > 7.6 && x.mantle.vp < 8.4), [tibet, pacific, shield].map((x) => x.mantle.vp).join(', '));
+  } else {
+    console.log('skip  crust: crust-crust1 missing');
   }
 }
 
