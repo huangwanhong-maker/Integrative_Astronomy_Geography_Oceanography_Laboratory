@@ -50,6 +50,10 @@ const QUANTITIES = [
   { id: 'swell-period', standard: 'sea_surface_swell_wave_period', label: 'Swell period', colormap: 'speed', reverse: true, range: [2, 18] },
   { id: 'wind-sea-period', standard: 'sea_surface_wind_wave_period', label: 'Wind-sea period', colormap: 'speed', reverse: true, range: [1, 12] },
   { id: 'elevation', standard: 'altitude', label: 'Elevation', base: true },
+  // The crust (CRUST1.0): maps only; the place card draws the whole column.
+  { id: 'moho', match: (v) => v.name === 'moho_depth', label: 'Depth of the Moho', colormap: 'deep', range: [0, 70], noProbe: true },
+  { id: 'crust-thickness', match: (v) => v.name === 'crust_thickness', label: 'Thickness of the crust', colormap: 'matter', reverse: true, range: [0, 70], noProbe: true },
+  { id: 'sediment-thickness', match: (v) => v.name === 'sediment_thickness', label: 'Thickness of sediments', colormap: 'speed', reverse: true, range: [0, 12], noProbe: true },
 ];
 
 // Monthly normals of a climatology, recognised by standard name and cell methods.
@@ -189,7 +193,7 @@ export function buildCatalogue(library) {
       const qid = known ? known.id : v.name;
       const label = known ? `${known.label}${height(v)}${spread ? ', ensemble spread' : ''}` : capital(v.long_name || v.name);
       const shownModel = isMean(v) ? `${model} mean` : model;
-      probes.push({ kind: 'scalar', id: known && known.id, label, model: shownModel, product: name, variables: [v.name], units: v.units, domain, percent: known && known.percent, spread, key: `${qid}|${level}|${spread ? 'spread' : ''}` });
+      if (!(known && known.noProbe)) probes.push({ kind: 'scalar', id: known && known.id, label, model: shownModel, product: name, variables: [v.name], units: v.units, domain, percent: known && known.percent, spread, key: `${qid}|${level}|${spread ? 'spread' : ''}` });
       if (known && known.base) continue;
       if (v.standard_name === 'cloud_area_fraction' && !spread) clouds.push({ product: name, variable: v.name, model });
       let style;

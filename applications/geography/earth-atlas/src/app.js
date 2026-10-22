@@ -22,6 +22,8 @@ import { MechanismsLayer, KIND_COLOURS } from './layers/mechanisms.js';
 import { mechanism } from './core/moment.js';
 import { stereonet } from './ui/stereonet.js';
 import { arcDeg } from './core/cyclones.js';
+import { cellIndex, column as crustColumn } from './core/crust.js';
+import { crustDiagram } from './ui/crust.js';
 import { SeriesFigure } from './ui/series.js';
 import { Requests } from './data/requests.js';
 import { ImageryLayer, DetailLayer } from './layers/imagery.js';
@@ -59,7 +61,7 @@ const state = {
 };
 
 let library, catalogue, stage, base, surface, flow, lines, events, labels, timeline, geography, elevation, tracks;
-let imagery, detail, labModel, detailSource = null, ocean, plates, stations, series, mechanisms;
+let imagery, detail, labModel, detailSource = null, ocean, plates, stations, series, mechanisms, crust = null;
 const asked = new Requests();       // data requested on demand for the place card, other than the ocean's
 const lab = { input: null, running: null, progress: 0, runs: {}, start: null, against: '', error: '' };
 const MODEL_COLOURS = ['#CA8DBE', '#f6c47e', '#9fb6e8', '#8fd1b4', '#e8a0a0'];
@@ -168,6 +170,7 @@ async function start() {
   requestAnimationFrame(loop);
 
   // The rest of the data, for the place card.
+  library.crust().then((c) => { crust = c; dirty.place = true; }).catch((e) => console.error('crust', e));
   for (const [name] of library.fieldMeta) track(name);
   for (const e of library.list('indicators')) loadIndicator(e.name);
   const present = presentClasses();
@@ -767,6 +770,19 @@ function placeCard() {
     add('geophysics', 'Tension axis', axis(mech.axes.T));
     quakeFigure = { svg: stereonet(mech, quake.m, KIND_COLOURS[mech.kind]), caption: 'Lower hemisphere, equal area, north up: coloured where the first motion of P waves is a push; the two nodal planes; P and T axes. Global CMT.' };
   }
+  // The crust beneath, from CRUST1.0: its layers to the Moho.
+  let crustFigure = null;
+  if (crust) {
+    const g = crust.meta.grid, cell = cellIndex(g, lon, lat), n = g.nlon * g.nlat;
+    const q = Object.fromEntries(crust.meta.quantities.map((x) => [x.name, x]));
+    const c = crustColumn((name, k) => crust.values[q[name].offsets[k] / 2 + cell] * q[name].scale);
+    if (Number.isFinite(c.moho) && cell < n) {
+      add('geophysics', 'The crust beneath', `${c.crust.toFixed(1)} km thick <span class="dir">${c.oceanic ? 'oceanic' : 'continental'}</span>`);
+      add('geophysics', 'Moho', `${c.moho.toFixed(1)} km below sea level`);
+      if (c.sediments > 0.05) add('geophysics', 'Sediments', `${c.sediments.toFixed(1)} km`);
+      crustFigure = { svg: crustDiagram(c), caption: 'CRUST1.0 (Laske et al. 2013), the 1° cell containing this place: layers to scale with their P-wave speeds; the Moho, where P waves quicken to about 8 km/s, divides crust from mantle.' };
+    }
+  }
   // A GPS station chosen.
   const st = state.station && stations.find(state.station);
   if (st) {
@@ -804,7 +820,7 @@ function placeCard() {
     sub: sub2,
     pinned: true,
     rows,
-    sections: ordered.map(([heading, r]) => ({ heading, rows: r, figure: heading === DOMAINS.climate ? climate.figure : heading === DOMAINS.geophysics ? quakeFigure : null })),
+    sections: ordered.map(([heading, r]) => ({ heading, rows: r, figure: heading === DOMAINS.climate ? climate.figure : heading === DOMAINS.geophysics ? (quakeFigure || crustFigure) : null })),
     series,
     models: palette.length > 1 ? palette.map((m, i) => ({ model: m, colour: MODEL_COLOURS[i % MODEL_COLOURS.length] })) : null,
   };
@@ -1015,6 +1031,7 @@ function renderAbout() {
   if (lab.input) rows.push(`<dt>Laboratory models</dt><dd>Two models of the flow at 500 hPa, solved by the spectral transform method at triangular truncation T42 (a Gaussian grid of 128 × 64) with fourth-order Runge–Kutta steps. The barotropic vorticity equation, as in the first numerical forecast (Charney, Fjørtoft and von Neumann 1950), starts from the wind of the GFS, in steps of 30 min; heights follow by linear balance and are added, as changes, to the analysed height. The shallow-water equations start from its wind and height, in steps of 15 min, after a digital filter over six hours removes the gravity waves of an unbalanced start (Lynch and Huang 1992); their finite radius of deformation slows the longest waves, which the barotropic model moves westward too fast. Tested against the Rossby–Haurwitz wave, Williamson et al.'s steady flow across the poles, and gravity waves of known period.</dd>`);
   if (catalogue.normals.length) rows.push(`<dt>Climate</dt><dd>Climate classes follow Köppen (1936) as revised by Peel et al. (2007) and Beck et al. (2018): the arid group first, then the tropical, polar, temperate and cold groups, with summer the warmer half-year. Besides the published maps, the atlas classifies the ${esc(catalogue.normals[0].model)} normals itself, with the mean temperature of a month taken as the mean of its daily maximum and minimum; the two agree in about nine land cells in ten. Climate diagrams follow Walter and Lieth (1960): 10 °C to 20 mm, dry where precipitation falls below twice the temperature (Gaussen).</dd>`);
   if (plates.meta) rows.push(`<dt>Tectonic plates</dt><dd>The outlines of 52 plates and the classes of their boundaries are Bird's model PB2002 (as converted by H. Ahlenius, Nordpil; ODC Attribution licence). Each plate turns rigidly about its pole, at the rate of NNR-MORVEL56 (Argus, Gordon and DeMets 2011), relative to the no-net-rotation frame, the mean motion of the whole surface: a point moves at ω × r, computed here on the WGS 84 ellipsoid. Bird's Africa takes MORVEL's Nubia; MORVEL's Capricorn, Lwandle, Macquarie and Sur, which PB2002 does not outline, move with the plates containing them. Across a boundary the relative motion is resolved into opening (or closing) and sliding, right- or left-lateral. <i>Bird, P. (2003), G-cubed 4(3), 1027; Argus, D. F., Gordon, R. G. and DeMets, C. (2011), G-cubed 12, Q11001.</i></dd>`);
+  if (library.list('crust').length) rows.push(`<dt>The crust</dt><dd>CRUST1.0 (Laske, Masters, Ma and Pasyanos 2013): on 1° cells, water, ice, three layers of sediment and three of crystalline crust down to the Moho, each with its P- and S-wave speed and density, and the speed of P waves just below the Moho. A place takes the values of the cell containing it, as the model's authors advise. No licence is stated; cite Laske et al. (2013), EGU2013-2658.</dd>`);
   if (library.list('stations').length) rows.push(`<dt>GPS stations</dt><dd>The velocities of some 20,000 continuous GNSS stations, estimated by MIDAS (Blewitt et al. 2016) at the Nevada Geodetic Laboratory, in IGS20, aligned with ITRF2020; kept where a station has run for two years or more with horizontal uncertainties of 2 mm/yr or less. Relative to its plate, a station's velocity is less the motion of the plate it stands on (NNR-MORVEL56; ITRF2020's own rotation against the no-net-rotation frame, a fraction of a millimetre a year, remains). A station's daily positions are asked for on demand. No licence is stated; data are supplied as is. <i>Blewitt, G., Hammond, W. C. and Kreemer, C. (2018), Eos 99, doi:10.1029/2018EO104623.</i></dd>`);
   if (library.list('events').some((e) => e.kind === 'mechanism')) rows.push(`<dt>Earthquake mechanisms</dt><dd>The centroid moment tensors of the Global CMT Project, about 70,000 earthquakes since 1976 (final solutions, and the quick ones of the present year). Each is drawn as a beach ball: the lower hemisphere of the source in equal-area projection, north up, coloured where the first motion of P waves is a push. Its axes and nodal planes are computed here from the tensor's eigenvectors (they agree with the catalogue's own to within a degree), and it is called thrust, normal or strike-slip by the plunges of its axes (Frohlich 1992). <i>Dziewonski, Chou and Woodhouse (1981), J. Geophys. Res. 86, 2825; Ekström, Nettles and Dziewonski (2012), Phys. Earth Planet. Inter. 200-201, 1.</i></dd>`);
   rows.push(`<dt>The ocean beneath a place</dt><dd>Asked for on demand, through this atlas's server and the laboratory's data library, from the US Navy's global ocean model (ESPC-D-V02, its ocean HYCOM on a 1/12° grid with 40 levels to 5000 m) on HYCOM.org's OPeNDAP server: the column at the model's grid point nearest the place, every 6 hours from two days back to four ahead. Approved for public release, distribution unlimited; HYCOM was developed with funding from the National Ocean Partnership Program and the Office of Naval Research, and its data-assimilative products are funded by the U.S. Navy. <i>Barton, N., et al. (2021), The Navy's Earth System Prediction Capability, Earth and Space Science 8, e2020EA001199.</i> The mixed layer is where temperature first differs from that at 10 m by 0.2 °C (de Boyer Montégut et al. 2004).</dd>`);

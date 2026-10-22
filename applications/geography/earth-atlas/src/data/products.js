@@ -99,6 +99,16 @@ export class Library {
     return this.plateSets.get(entry.name);
   }
 
+  // A crust product (the layers of CRUST1.0): its description and its values, read once.
+  crust() {
+    if (!this.crustSet) {
+      const entry = this.list('crust')[0];
+      this.crustSet = entry ? json(`${this.base}/${entry.file}`)
+        .then(async (meta) => ({ meta, values: new Int16Array(await binary(`${this.base}/${meta.file}`)) })) : Promise.resolve(null);
+    }
+    return this.crustSet;
+  }
+
   // A stations product (GPS velocities), read once.
   stationSet(name) {
     if (!this.stationSets) this.stationSets = new Map();

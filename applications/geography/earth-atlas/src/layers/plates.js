@@ -255,13 +255,13 @@ export class PlatesLayer {
     if (near && near.km < 1500) {
       const kind = this.meta.classes[near.step[4]];
       const a = this.across(near.step);
-      rows.push(['Nearest plate boundary', `${near.km < 1 ? 'here' : `${near.km.toFixed(0)} km`} <span class="dir">${esc(kind.name)}</span>`]);
+      rows.push(['Nearest plate boundary', near.km < 1 ? 'here' : `${near.km.toFixed(0)} km away`]);
       if (a) {
         const other = a.left === p ? a.right : a.right === p ? a.left : null;
         const pair = other ? `${esc(other.name)} and ${esc(p.name)}` : `${esc(a.left.name)} and ${esc(a.right.name)}`;
         const opening = a.divergence >= 0 ? `open at ${a.divergence.toFixed(1)} mm/yr` : `close at ${(-a.divergence).toFixed(1)} mm/yr`;
         const slide = Math.abs(a.rightLateral) >= 0.5 ? ` and slide ${Math.abs(a.rightLateral).toFixed(1)} mm/yr past each other, ${a.rightLateral > 0 ? 'right' : 'left'}-laterally` : '';
-        let text = `${pair} ${opening}${slide}.`;
+        let text = `${esc(kind.name.charAt(0).toUpperCase() + kind.name.slice(1))}: ${pair} ${opening}${slide}.`;
         if (kind.code === 'SUB') {
           const over = near.step[7] === 1 ? a.left : a.right, under = near.step[7] === 1 ? a.right : a.left;
           text += ` ${esc(under.name)} sinks beneath ${esc(over.name)}.`;

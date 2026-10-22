@@ -118,6 +118,14 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) 330px; min-height: 0
 #legend .keys i.line.dashed { border-top-style: dashed; }
 #legend .keys i.ball { background: conic-gradient(var(--c) 0 25%, #fbf1ea 0 50%, var(--c) 0 75%, #fbf1ea 0); box-shadow: 0 0 0 1px #2b1d2d; }
 .stereonet { display: block; margin: 4px auto 0; }
+.crust-diagram { display: block; width: 100%; height: auto; }
+.crust-diagram text { font: 10.5px var(--serif); fill: var(--text-dim); }
+.crust-diagram .layer { fill: var(--text); }
+.crust-diagram .v { fill: var(--text-faint); font-style: italic; }
+.crust-diagram .depth { text-anchor: end; fill: var(--text-faint); }
+.crust-diagram .moho { text-anchor: end; fill: var(--gold); font-style: italic; }
+.crust-diagram .tick { stroke: var(--text-faint); }
+.crust-diagram .sea { stroke: rgba(169, 189, 224, 0.7); stroke-dasharray: 2 2; }
 .stereonet text { font: italic 11px var(--serif); fill: var(--text); paint-order: stroke; stroke: rgba(18, 13, 20, 0.85); stroke-width: 2.5px; }
 .stereonet .north { text-anchor: middle; fill: var(--text-dim); stroke: none; font-style: normal; }
 #legend .keys i.arrow { position: relative; height: 0; border-radius: 0; box-shadow: none; border-top: 1.5px solid #fff3e6; vertical-align: 3px; margin-right: 10px; }
@@ -135,9 +143,10 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) 330px; min-height: 0
 #place h2 { font-weight: 500; font-size: 24px; line-height: 1.2; margin: 0; overflow-wrap: anywhere; }
 #place .sub { margin: 2px 0 12px; color: var(--text-dim); font-style: italic; }
 #place .hint { color: var(--text-dim); font-style: italic; margin: 6px 0 0; font-size: 14px; }
-#place dl { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 14px; margin: 0; }
+#place dl { display: grid; grid-template-columns: minmax(92px, 1fr) minmax(0, auto); gap: 4px 14px; margin: 0; }
 #place dt { color: var(--text-dim); font-size: 13px; padding-top: 1px; }
-#place dd { margin: 0; text-align: right; font-size: 14px; white-space: nowrap; }
+/* Values keep to one line when they can, and wrap rather than squeeze their terms. */
+#place dd { margin: 0; text-align: right; font-size: 14px; overflow-wrap: anywhere; }
 #place dd .dir { color: var(--text-dim); font-size: 12.5px; }
 #place dt.model { padding-left: 14px; font-size: 12px; font-style: italic; color: var(--text-faint); }
 #place dd.model { font-size: 13px; color: var(--text-dim); }

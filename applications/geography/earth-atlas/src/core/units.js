@@ -24,6 +24,7 @@ const AFFINE = {
   'J kg-1': { unit: 'J/kg', a: 1, b: 0 },
   's-1': { unit: '10⁻⁵ s⁻¹', a: 1e5, b: 0 },           // vorticity, in the unit of synoptic charts
   'mm yr-1': { unit: 'mm/yr', a: 1, b: 0 },            // plate motion
+  'km': { unit: 'km', a: 1, b: 0 },
 };
 
 // Alternative units the reader may choose for a quantity stored in given units.
