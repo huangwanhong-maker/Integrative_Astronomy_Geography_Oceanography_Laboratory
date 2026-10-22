@@ -5,7 +5,7 @@
 These are screenshots of the laboratory's two applications, taken on 22 October 2026 from their local servers, with the data of that day.
 
 - Both are web applications without a build step.
-- Their computations are the laboratory's provisional core, tested against published references: 114 checks for the Earth Atlas and 66 for the Celestial Atlas.
+- Their computations are the laboratory's provisional core, tested against published references: 151 checks for the Earth Atlas and 66 for the Celestial Atlas.
 - Each caption says what is shown, where the data come from, and how the picture is made.
 
 Click an image to see it at full size. To run the applications yourself, see the READMEs of the [Earth Atlas](../applications/geography/earth-atlas/README.md) and the [Celestial Atlas](../applications/astronomy/celestial-atlas/README.md).
@@ -108,6 +108,27 @@ The atlas also classifies the TerraClimate normals itself, by the rules of Beck 
 </tr>
 </table>
 
+### 1.7 The Ocean Beneath, and the Solid Earth
+
+Choose a place, and the atlas looks beneath it: into the ocean, fetched on demand from the US Navy's ocean model ([ADR 0023](../development/decisions/0023-ocean-column-and-data-on-demand.md)), and into the solid Earth: its plates, the motion of the ground, its earthquakes and its crust ([ADR 0024](../development/decisions/0024-the-solid-earth.md)).
+
+<table>
+<tr>
+<td width="50%" valign="top"><a href="../assets/gallery/earth-19-ocean-column.jpg"><img src="../assets/gallery/earth-19-ocean-column.jpg" alt="Currents and temperature beneath the Kuroshio by depth and time"></a><br><b>The ocean beneath a place.</b> The Kuroshio south of Japan, as a current profiler would record it: eastward and northward current and temperature to 1000 m, two days back and four ahead, from HYCOM (US Navy). The strip above is the Sun's height there; the dashed line, the mixed layer; the pointer reads every value.</td>
+<td width="50%" valign="top"><a href="../assets/gallery/earth-20-plates.jpg"><img src="../assets/gallery/earth-20-plates.jpg" alt="The tectonic plates coloured by speed, with their boundaries and moving particles"></a><br><b>The plates in motion.</b> The 52 plates of PB2002 (Bird 2003), coloured by their speed in NNR-MORVEL56 and carried as particles, about 10¹⁵ times faster than real. The Pacific and the plates around Australia move fastest; boundaries are coloured by kind, with teeth on the overriding plate at trenches.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><a href="../assets/gallery/earth-21-gps-record.jpg"><img src="../assets/gallery/earth-21-gps-record.jpg" alt="A GPS station's daily positions at Sendai since 1994, with the 2011 earthquake"></a><br><b>Where the ground has moved.</b> GPS station J037 at Sendai since 1994, its plate's motion removed: the Tōhoku earthquake of 2011 threw it 3 m east and 1 m south, and it has crept east since, as the mantle relaxes. Dashed: earthquakes near enough to move it. On the map, GPS velocities relative to their plates (Nevada Geodetic Laboratory).</td>
+<td width="50%" valign="top"><a href="../assets/gallery/earth-22-mechanisms.jpg"><img src="../assets/gallery/earth-22-mechanisms.jpg" alt="Beach balls of large earthquakes around Japan, with the Tohoku mechanism"></a><br><b>How the ground broke.</b> Every earthquake of magnitude 6.5 and more since 1976 around Japan, as beach balls from Global CMT moment tensors: thrusts (rose) along the trenches, normal faults (blue) on the outer rise. The place card gives Tōhoku's planes and axes on a stereonet.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><a href="../assets/gallery/earth-23-section.jpg"><img src="../assets/gallery/earth-23-section.jpg" alt="A section across the Japan Trench with earthquakes tracing the sinking Pacific plate"></a><br><b>A section across the Japan Trench,</b> toward the overriding plate: the relief above, the crust to the Moho, and the earthquakes within 100 km of the line, which trace the Pacific plate sinking westward, the Wadati–Benioff zone, down to 450 km beneath the Sea of Japan.</td>
+<td width="50%" valign="top"><a href="../assets/gallery/earth-24-crust.jpg"><img src="../assets/gallery/earth-24-crust.jpg" alt="The depth of the Moho on the Equal Earth projection, and the crust beneath Lhasa"></a><br><b>The crust.</b> The depth of the Moho from CRUST1.0, from 7 km under the oceans to 70 km under Tibet; beside it, the column beneath Lhasa, 75 km of crust to scale, with each layer's P-wave speed.</td>
+</tr>
+</table>
+
+Their verification: plate velocities agree with the EarthScope calculator to 0.005 mm/yr; GPS stations in stable plate interiors move by 0.3 to 0.6 mm/yr relative to their plate; the nodal planes of all 70,451 Global CMT earthquakes agree with the catalogue's within 0.76° (99 %). The theory is in [the note on plate kinematics](../theory/geodesy/plate-kinematics.md), [the note on earthquake mechanisms](../theory/geophysics/earthquake-mechanisms.md) and [the note on the ocean column](../theory/oceanography/the-ocean-column.md).
+
 ## 2. The Celestial Atlas
 
 The Sun, the Moon, the planets, the stars and the galaxies, at any instant from 1849 to 2150 or live. Positions come from JPL's DE440 ephemeris, read directly from its kernel.
@@ -171,6 +192,11 @@ The screenshots are the laboratory's, under its MIT licence, except the three th
 | Imagery of the Earth | VIIRS true colour, Blue Marble and Black Marble (NASA, via GIBS) | NASA, acknowledge |
 | Country indicators | World Bank, World Development Indicators | CC BY 4.0 |
 | Earthquakes | USGS ComCat | Public domain |
+| The ocean beneath a place | HYCOM ESPC-D-V02 (US Navy, via HYCOM.org) | Public release, distribution unlimited |
+| Tectonic plates | PB2002 (Bird 2003), as converted by H. Ahlenius (Nordpil); motion NNR-MORVEL56 (Argus et al. 2011) | ODC Attribution 1.0 |
+| GPS velocities and positions | Nevada Geodetic Laboratory (Blewitt, Hammond and Kreemer 2018) | None stated; supplied as is; cited |
+| Earthquake mechanisms | Global CMT Project (Dziewonski et al. 1981; Ekström et al. 2012) | None stated; cited |
+| The crust | CRUST1.0 (Laske et al. 2013) | None stated; cited |
 | Ephemeris | JPL DE440 (Park et al. 2021) | Freely distributed |
 | Maps of the bodies and the sky | Solar System Scope (INOVE), from NASA, JPL and ESA data | CC BY 4.0 |
 | Detail of the Moon and Mars | LRO WAC (NASA/GSFC/ASU), Viking MDIM 2.1 (NASA/USGS), via NASA Trek | NASA, acknowledge |

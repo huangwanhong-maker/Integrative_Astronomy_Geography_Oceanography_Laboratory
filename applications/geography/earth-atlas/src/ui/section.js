@@ -182,7 +182,7 @@ export class SectionFigure {
     for (let s = -last; s <= this.half; s += step) {
       ctx.fillRect(Math.round(L.x(s)), d.y + d.h, 1, 4);
       ctx.textAlign = s === last ? 'right' : 'center';
-      ctx.fillText(`${s === 0 ? '0' : `${s > 0 ? '' : '−'}${Math.abs(s)}`}${s === last ? ' km along the section' : ''}`, L.x(s) + (s === last ? 4 : 0), d.y + d.h + 6);
+      ctx.fillText(`${s === 0 ? '0' : `${s > 0 ? '' : '−'}${Math.abs(s)}`}${s === last ? ' km' : ''}`, L.x(s) + (s === last ? 4 : 0), d.y + d.h + 6);
     }
     ctx.fillStyle = GOLD; ctx.beginPath();
     ctx.moveTo(L.x(this.centreS || 0), d.y - 1); ctx.lineTo(L.x(this.centreS || 0) - 5, d.y - 8); ctx.lineTo(L.x(this.centreS || 0) + 5, d.y - 8); ctx.closePath(); ctx.fill();
