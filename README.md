@@ -2,6 +2,8 @@
 
 This is a long-term programme to learn, use and research astronomy, geography, oceanography and meteorology as one connected body of knowledge, in both theory and practice. Geometry, mathematics and physics form the shared foundation.
 
+It is the first laboratory of [The Science Infrastructures](https://github.com/huangwanhong-maker/The-Science-Infrastructures), an umbrella of laboratories for all the sciences.
+
 <p align="center">
 <a href="docs/gallery.md"><img src="assets/gallery/earth-15-cyclone-forecasts.jpg" width="32%" alt="Forecast tracks of a typhoon from several models, including an AI model run by the laboratory, in the Earth Atlas"></a>
 <a href="docs/gallery.md"><img src="assets/gallery/earth-08-koppen.jpg" width="32%" alt="Köppen–Geiger climate classes over Asia in the Earth Atlas"></a>

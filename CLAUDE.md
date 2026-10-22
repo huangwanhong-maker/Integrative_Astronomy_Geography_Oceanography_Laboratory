@@ -7,6 +7,7 @@ This file can be revised: when a decision recorded here changes, update this fil
 - The detailed design is in [docs/architecture.md](docs/architecture.md).
 - Decisions and the reasons for them are in [development/decisions/](development/decisions/).
 - Each library under `lib/` has its own CLAUDE.md, which governs work inside that library.
+- The laboratory is the first laboratory of [The Science Infrastructures](https://github.com/huangwanhong-maker/The-Science-Infrastructures), an umbrella of laboratories for all the sciences, which holds it as a submodule. That repository's CLAUDE.md governs work above this one.
 
 ## 1. Purpose and Scope
 
@@ -264,7 +265,7 @@ Each module directory contains:
 - **Commit order.** Commit in dependency order: calx and morphe first, then physis, then the laboratory.
 - **Each library's own CLAUDE.md.** When working inside `lib/<name>`, read that library's CLAUDE.md first; it governs work there.
 - **Links between repositories.** Use absolute GitHub URLs.
-- **Shared conventions.** The writing style, status vocabulary, and decision and idea conventions are shared by all four repositories. Change them in all four together.
+- **Shared conventions.** The writing style, status vocabulary, and decision and idea conventions are shared by every repository of The Science Infrastructures: this laboratory, its three libraries, and the umbrella. Change them in all of them together.
 - **Pushing.** Push only with the user's agreement.
 
 ### 6.6 Collaboration Style
@@ -326,6 +327,7 @@ As of 2026-10-22:
 - The layered directory structure is in place, with READMEs.
 - The three libraries are scaffolded as their own git repositories and attached under `lib/`.
 - All four repositories are published on GitHub.
+- Since 2026-10-22 the laboratory is the first laboratory of [The Science Infrastructures](https://github.com/huangwanhong-maker/The-Science-Infrastructures), at `The Science/astronomy and geometry`. The umbrella proposes to raise the three libraries to its own `lib/` (its ADR 0001); that awaits the user's agreement.
 - The first application, `applications/astronomy/celestial-atlas`, works ([ADR 0011](development/decisions/0011-first-application-celestial-atlas.md)).
   - It is a web application with five views:
     - Solar System;
