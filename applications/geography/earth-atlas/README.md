@@ -1,6 +1,6 @@
 # Earth Atlas
 
-*Status: draft (2026-10-22). Kind: tool. Field: geography (cartography), showing data from meteorology, oceanography, geography and geophysics.* Decision records: [ADR 0014](../../../development/decisions/0014-earth-atlas-separated-data-and-typed-layers.md), [ADR 0015](../../../development/decisions/0015-earth-atlas-models-imagery-detail.md), [ADR 0017](../../../development/decisions/0017-climate-classes-and-normals.md), [ADR 0018](../../../development/decisions/0018-fine-relief-at-close-range.md), [ADR 0019](../../../development/decisions/0019-shallow-water-model.md), [ADR 0022](../../../development/decisions/0022-ai-forecast-cyclones-and-disasters.md), [ADR 0023](../../../development/decisions/0023-ocean-column-and-data-on-demand.md).
+*Status: draft (2026-10-22). Kind: tool. Field: geography (cartography), showing data from meteorology, oceanography, geography and geophysics.* Decision records: [ADR 0014](../../../development/decisions/0014-earth-atlas-separated-data-and-typed-layers.md), [ADR 0015](../../../development/decisions/0015-earth-atlas-models-imagery-detail.md), [ADR 0017](../../../development/decisions/0017-climate-classes-and-normals.md), [ADR 0018](../../../development/decisions/0018-fine-relief-at-close-range.md), [ADR 0019](../../../development/decisions/0019-shallow-water-model.md), [ADR 0022](../../../development/decisions/0022-ai-forecast-cyclones-and-disasters.md), [ADR 0023](../../../development/decisions/0023-ocean-column-and-data-on-demand.md), [ADR 0024](../../../development/decisions/0024-the-solid-earth.md).
 
 The Earth Atlas shows the atmosphere, the ocean, the land and the people of the Earth on one globe, at one instant. Each kind of data comes from its own dataset and is joined to the map only here, in the application. Forecasts from several models can be compared: NOAA's, an AI model the laboratory runs itself, and two simple models of our own that run in the page. Tropical cyclones are found in every forecast and set beside their observed tracks and official forecasts, and current disasters are shown by their alert levels. Climates can be read too: their classes from 1901 to 2099, and the normal year of any place. The map itself is one dataset among others, and carries no values but names and places.
 
@@ -41,6 +41,12 @@ The Earth Atlas shows the atmosphere, the ocean, the land and the people of the 
   - eastward and northward current, and temperature, against depth and time, from two days back to four ahead;
   - the Sun's height at the place, the start of the forecast, isotherms, the mixed layer and the sea floor;
   - a reading under the pointer.
+- **The solid Earth.**
+  - **Plates.** The tectonic plates (PB2002, Bird 2003) and their boundaries, drawn by class, with teeth on the overriding plate at subduction zones. They move by NNR-MORVEL56 (Argus et al. 2011), as particles or coloured by speed. The place card gives a place's plate, its pole, and the relative motion across the nearest boundary.
+  - **GPS.** How the ground moves at some 20,000 GPS stations (MIDAS velocities, Nevada Geodetic Laboratory), in IGS20 or relative to each station's plate (ITRF2020's plate motion model). A station's daily record since it began is fetched on demand, with the earthquakes that moved it.
+  - **Mechanisms.** Earthquake mechanisms of the Global CMT catalogue as beach balls coloured by faulting: the past year, or every earthquake of magnitude 6.5 and more since 1976. Each has a stereonet in the place card.
+  - **The crust.** The crust beneath a place (CRUST1.0) drawn to scale, and maps of the Moho's depth and of the crust's and sediments' thicknesses.
+  - **Sections.** A section through the Earth across the nearest plate boundary: relief, crust, and the earthquakes that trace a sinking plate down to 660 km.
 - **Disaster alerts.** GDACS's events of the last month (tropical cyclones, earthquakes, floods, volcanoes, droughts, wildfires) are drawn by alert level. These alerts are automatic, and the atlas is not a warning service.
 - **Our own models.** Two models run in the page from the GFS analysis at 500 hPa:
   - the barotropic vorticity equation, that of the first numerical weather prediction (1950);
@@ -76,6 +82,11 @@ python data/products/country_indicators.py
 python data/products/event_catalog.py
 python data/acquisition/fetch.py gdacs                                    # disasters and cyclone tracks
 python data/products/disaster_catalog.py
+python data/acquisition/fetch.py pb2002 ngl-midas gcmt crust1             # the solid Earth (about 25 MB)
+python data/products/plate_model.py
+python data/products/station_velocities.py
+python data/products/mechanism_catalog.py
+python data/products/crust_model.py
 python applications/geography/earth-atlas/serve.py --open
 ```
 
@@ -122,6 +133,10 @@ The page also loads three.js from jsDelivr and Source Serif 4 from Google Fonts.
 | An AI forecast run here: surface, 850, 500 and 250 hPa, 1°, every 6 h, a week | Pangu-Weather (Bi et al. 2023), from the GFS analysis at 0.25° (NOAA NCEP, NOMADS) | `fields-pangu-forecast`, `fields-pangu-hindcast` | Weights CC BY-NC-SA 4.0: learning and research only |
 | Disasters of the last month, with alert levels; cyclone tracks, observed and forecast | GDACS (UN and EC JRC), relaying the warning centres | `events-gdacs-month`, `tracks-gdacs-month` | No reuse licence stated: fetched, not redistributed |
 | The ocean beneath a place: currents and temperature by depth | HYCOM ESPC-D-V02 (US Navy, via HYCOM.org), on demand | `columns/column-hycom-column-*` | Public release, distribution unlimited |
+| Tectonic plates and their boundaries | PB2002 (Bird 2003), via fraxen/tectonicplates | `plates-pb2002` | ODC Attribution 1.0 |
+| GPS station velocities; a station's daily positions | Nevada Geodetic Laboratory (MIDAS, IGS20); positions on demand | `stations-ngl-midas`, `series/series-ngl-*` | None stated; cite Blewitt et al. (2018) |
+| Earthquake mechanisms, 1976 to the present | Global CMT Project | `events-gcmt` | None stated; cite Dziewonski et al. (1981), Ekström et al. (2012) |
+| The crust | CRUST1.0 (Laske et al. 2013) | `crust-crust1`, `fields-crust1` | None stated; cite Laske et al. (2013) |
 | Climate classes, 1901–2099 | Köppen–Geiger maps of Beck et al. (2023), 0.1°: 1901–1930, 1931–1960, 1961–1990, 1991–2020; 2041–2070 and 2071–2099 under SSP1-2.6, SSP2-4.5, SSP3-7.0 and SSP5-8.5 | `classes-koppen-geiger-*` | CC BY 4.0 |
 | Climate normals, 1991–2020 | TerraClimate (Abatzoglou et al. 2018), monthly daily maximum and minimum temperature and precipitation, every 1/3°, via OPeNDAP | `fields-terraclimate-normals-medium` | CC0 |
 
@@ -139,6 +154,9 @@ The ERDDAP servers add: "The data may be used and redistributed for free but is 
 | AI forecast | Pangu-Weather's 24 h and 6 h models (ONNX, onnxruntime on the CPU), composed by hierarchical temporal aggregation in the fewest steps; geopotential as height times 9.80665 m s⁻²; every fourth point kept for 1° | Bi et al. (2023); `data/products/ai_forecast.py`; [theory note](../../../theory/meteorology/learned-forecast-models.md) |
 | Tropical cyclones | A sea-level pressure minimum, lowest within 6°, with a pressure rise of 2 hPa within 5.5° along 16 rays; placed between grid points by a paraboloid; linked within 8° per 6 h, nearest pairs first; kept if it lasts 24 h, deepens to 1000 hPa and begins over the sea within 25° of the equator | Ullrich and Zarzycki (2017); `src/core/cyclones.js`; [theory note](../../../theory/meteorology/tropical-cyclone-tracking.md) |
 | The ocean column | The model's grid point nearest the place; linear in time and depth between its times and levels; mixed layer where temperature first differs from that at 10 m by 0.2 °C; inertial period 2π / f; currents named by where they flow | de Boyer Montégut et al. (2004), Gill (1982); `src/core/ocean.js`, `src/ui/column.js`; [theory note](../../../theory/oceanography/the-ocean-column.md) |
+| Plate motion | v = ω × r on WGS 84, ω from NNR-MORVEL56 (in the core); relative motion as the difference of angular velocities, resolved across a boundary into opening and right-lateral sliding by Bird's conventions; GPS velocities relative to ITRF2020's plate motion model (with its origin rate bias) where it covers the plate | Argus et al. (2011), Altamimi et al. (2023), Bird (2003); `src/core/plates.js`; [theory note](../../../theory/geodesy/plate-kinematics.md) |
+| Mechanisms | Principal axes by Jacobi rotations; nodal planes from T ± P; classes by Frohlich's (1992) plunges; beach balls by xᵀMx per pixel, lower hemisphere, equal area, turned to the map's north | Aki and Richards (2002); `src/core/moment.js`, `src/render/beachballs.js`; [theory note](../../../theory/geophysics/earthquake-mechanisms.md) |
+| Sections | Along- and cross-track distances on the sphere; across the nearest boundary within 900 km, toward the overriding plate at a subduction zone | `src/core/section.js`, `src/ui/section.js` |
 | Model comparison | Differences on a diverging scale fitted to the 98th percentile over the shared forecast. The model's verification is the root-mean-square height error over 20–80° N, against analyses and against persistence. | `src/layers/surface.js`, `src/layers/labmodel.js` |
 | Day and night | Subsolar point from the Astronomical Almanac's low-precision Sun. Sunrise at −0.833°; civil, nautical and astronomical twilight at −6°, −12° and −18°. Lights from the Black Marble on the night side. | [theory note](../../../theory/astronomy/subsolar-point-and-twilight.md) |
 | Imagery and detail | Global images at 8192 × 4096. Gaps in a daily mosaic are filled from the day before; where imagery has none, the relief shows. At close range, a WMS request covers the region in view at the screen's resolution. | `data/products/imagery.py`, `src/layers/imagery.js` |
@@ -156,7 +174,7 @@ The ERDDAP servers add: "The data may be used and redistributed for free but is 
 node applications/geography/earth-atlas/tests/run-tests.mjs
 ```
 
-There are 124 checks. The checks on real data need the products; without them they are skipped.
+There are 151 checks. The checks on real data need the products; without them they are skipped.
 
 | Quantity | Reference | Agreement |
 |---|---|---|
@@ -186,6 +204,12 @@ There are 124 checks. The checks on real data need the products; without them th
 | Inertial period | At 30°, one sidereal day; at 60° S, by 1 / sin φ | 6 × 10⁻⁴ s; exact |
 | Mixed layer | A constructed profile, uniform to 50 m and cooling below (70 m) | 1 × 10⁻¹³ m |
 | Column interpolation | f = a + bt + cz + dtz on unequal times and depths; nothing beneath the sea floor | 9 × 10⁻¹⁶ |
+| Plate velocities | EarthScope Plate Motion Calculator: NNR-MORVEL56 at four places; ITRF2020's model, the Pacific | 0.005 mm/yr; 0.003 mm/yr |
+| Plates | PB2002's 52 plates tile the sphere; NNR-MORVEL56 on them has no net rotation | Every cell, areas to 2 × 10⁻⁹; 0.0008°/Myr |
+| Plate boundaries | Against Bird's classes and his relative motions: ridges and rifts open, trenches close, transforms slip in his sense | 99.7 %, 99.6 %, 99.4 % |
+| GPS | Stations in four stable plate interiors, relative to ITRF2020's model (median); P123's 20-year record against its MIDAS velocity | 0.3–0.6 mm/yr; 0.3 mm/yr |
+| Mechanisms | Double couples recovered; classes; eigenvalues; the equal-area projection; the nodal planes of all 70,451 Global CMT events against the catalogue's | 10⁻⁶ °; exact; 10⁻¹⁵; 10⁻¹⁵; 99 % within 0.76° |
+| Crust and sections | A constructed column; CRUST1.0 beneath Tibet, the Pacific and the Canadian Shield; along- and cross-track distances | Exact; within stated bounds; 10⁻¹¹ km |
 
 Fetch the reference values again with `python applications/geography/earth-atlas/tests/fetch_fixtures.py`.
 
@@ -204,6 +228,9 @@ The computation in `src/core/` is a provisional stand-in for the laboratory's C+
 | `src/core/shallowwater.js` | The shallow-water model; digital-filter initialisation | `core/domains/meteorology` |
 | `src/core/cyclones.js` | Tropical cyclones: detection, linking, positions between times | `core/domains/meteorology` |
 | `src/core/ocean.js` | The ocean column: inertial period, direction of flow, mixed layer, interpolation | `core/domains/oceanography` |
+| `src/core/plates.js` | Plate rotations (NNR-MORVEL56, ITRF2020's model), velocities, motion across boundaries | `core/domains/geodesy` |
+| `src/core/moment.js` | Moment tensors: axes, nodal planes, classes, radiation, the equal-area projection | `core/domains/geophysics` (proposed) |
+| `src/core/crust.js`, `src/core/section.js` | The crust beneath a place; sections along great circles | `core/domains/geophysics` (proposed), `geodesy` |
 | `src/core/climate.js` | Köppen–Geiger classes; dry months after Gaussen | `core/domains/climate` (zones) |
 | `src/core/contour.js` | Isolines, highs and lows | `core/domains/geography` |
 | `src/core/raster.js` | Polygons to rasters, areas | `core/domains/geography` (GIS) |
@@ -226,6 +253,7 @@ The computation in `src/core/` is a provisional stand-in for the laboratory's C+
 - Cyclone intensities are those of 1° fields, well above the true central pressures; Pangu-Weather underestimates intensity further, as its authors report. Tracks are the more trustworthy part.
 - The cyclone tracker has no warm-core test, so a strong monsoon depression may be counted.
 - The ocean column needs the atlas's own server (`serve.py`), which asks the data library; HYCOM's analyses lag about two days, and a first request takes minutes.
+- PB2002 has no outlines for MORVEL's Capricorn, Lwandle, Macquarie and Sur plates; NNR-MORVEL56 is a geological average and differs from GPS by a millimetre or two a year; Global CMT centroids are less precise in depth than relocated hypocentres; CRUST1.0 averages 1° cells; Slab2, the USGS slab model, cannot be fetched by a script and is not shown.
 - The AI forecast starts from the GFS analysis, not the ERA5 it was trained on, and is verified against GFS analyses, which favours forecasts close to the GFS.
 - Fine relief is ASTER's shading, a picture: its elevations are not read, so tints stay those of the 5′ grid. ASTER covers land between about 83° N and 83° S; elsewhere, and on the sea floor, the ETOPO shading remains.
 - Glaciers are drawn from Natural Earth's 1:50 m outlines, coarser than the fine relief.

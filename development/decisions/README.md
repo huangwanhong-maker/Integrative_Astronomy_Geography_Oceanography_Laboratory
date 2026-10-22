@@ -34,6 +34,7 @@ Decisions that concern only one library are recorded in that library's own `deve
 | [0021](0021-the-sky-from-a-place.md) | The sky from a place: choosing where to stand, and links between the atlases | Accepted, provisionally |
 | [0022](0022-ai-forecast-cyclones-and-disasters.md) | An AI weather model run in the laboratory, tropical cyclones tracked, and disaster alerts | Accepted, provisionally |
 | [0023](0023-ocean-column-and-data-on-demand.md) | The ocean beneath a place, and data requested on demand | Accepted, provisionally |
+| [0024](0024-the-solid-earth.md) | The solid Earth: plates, GPS, earthquake mechanisms, the crust and sections | Accepted, provisionally; geophysics as a field proposed |
 
 ## 2. Template
 

@@ -12,10 +12,10 @@ Manifests are read by [`../acquisition/fetch.py`](../acquisition/fetch.py). It d
 
 | Kind | Meaning | Example |
 |---|---|---|
-| `files` | Fixed files, downloaded as they are, or taken from a zip archive on the web. Each file's SHA-256 is recorded in the manifest and verified on every retrieval. | `jpl-de440s`, `natural-earth-50m`, `solar-system-maps`, `koppen-geiger`, `pangu-weather` |
+| `files` | Fixed files, downloaded as they are, or taken from a zip archive on the web. Each file's SHA-256 is recorded in the manifest and verified on every retrieval. | `jpl-de440s`, `natural-earth-50m`, `solar-system-maps`, `koppen-geiger`, `pangu-weather`, `pb2002`, `crust1` |
 | `tap` | A query to an astronomical archive through the IVOA Table Access Protocol | `gaia-dr3`, `ungc`, `tully-2mass-groups` |
 | `griddap` | A subset of a gridded dataset served by ERDDAP: which variables, which times, how fine a grid | `gfs`, `oisst`, `ww3`, `etopo-2022` |
-| `http` | One or more web requests built from URL templates, and optionally those the results link to | `worldbank-indicators`, `usgs-earthquakes`, `gibs-daily`, `gibs-static`, `gibs-relief`, `gfs-analysis-0p25`, `gdacs` |
+| `http` | One or more web requests built from URL templates, and optionally those the results link to | `worldbank-indicators`, `usgs-earthquakes`, `gibs-daily`, `gibs-static`, `gibs-relief`, `gfs-analysis-0p25`, `gdacs`, `ngl-midas`, `ngl-station`, `gcmt` |
 | `ncss` | Groups of variables of a forecast model's collection on a THREDDS server, by its NetCDF Subset Service: levels, times and grid spacing | `gfs-levels`, `aigfs`, `aigefs` |
 | `opendap` | One variable from each of several datasets on an OPeNDAP (DAP2) server, every n-th point of the grid, or the column beneath a place, saved as netCDF classic | `terraclimate-normals`, `hycom-column` |
 
@@ -48,7 +48,7 @@ These fields are shared by the parameterised kinds (`tap`, `griddap`, `http`, `n
 
 | Field | Meaning |
 |---|---|
-| `parameters` | For each parameter: `type`, `default`, optional `min` and `max`, and a `description`. The type is `int`, `float`, `str` or `time`. |
+| `parameters` | For each parameter: `type`, `default`, optional `min` and `max`, and a `description`. The type is `int`, `float`, `str` or `time`. A `str` parameter may have a `pattern` (a regular expression its whole value must match), as one that names a file on a server must. |
 | `profiles` | Named sets of parameter values, each with a `description` |
 | `default_profile` | The profile used when none is chosen |
 

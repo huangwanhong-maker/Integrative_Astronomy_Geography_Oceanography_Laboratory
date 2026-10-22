@@ -9,6 +9,7 @@ This directory holds expositions, derivations and proofs about the laboratory's 
 ## 2. Subjects
 
 - **Fields:** `astronomy/`, `geography/`, `oceanography/`, `meteorology/` and `geodesy/`.
+- **Proposed:** `geophysics/`, for the solid Earth's motion and structure (earthquakes, the crust). It has its first note; making geophysics a field awaits the user's agreement (ADR 0024).
 - **Bridging topics:** `tides/`, `navigation/`, `air_sea/` and `climate/`.
 
 A subject directory is created together with its first note.

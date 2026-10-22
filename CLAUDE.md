@@ -245,7 +245,7 @@ Each module directory contains:
 
 - Record decisions that shape structure, conventions or tooling in `development/decisions/NNNN-slug.md`, using the template in the index.
 - Never rewrite a record. A new record supersedes or amends it, and the old record's status is updated to point to the new one.
-- Records accepted so far: 0001–0023.
+- Records accepted so far: 0001–0024.
 
 ### 6.4 Change Discipline
 
@@ -322,7 +322,7 @@ Each module directory contains:
 
 As of 2026-10-22:
 
-- The architecture and decision records 0001–0023 are written.
+- The architecture and decision records 0001–0024 are written.
 - The layered directory structure is in place, with READMEs.
 - The three libraries are scaffolded as their own git repositories and attached under `lib/`.
 - All four repositories are published on GitHub.
@@ -345,15 +345,22 @@ As of 2026-10-22:
   - The laboratory runs an AI model itself: Pangu-Weather, from the GFS analysis at 0.25°, on the CPU, verified against later analyses ([ADR 0022](development/decisions/0022-ai-forecast-cyclones-and-disasters.md)).
   - Tropical cyclones are found in every forecast's sea-level pressure (after TempestExtremes) and drawn beside GDACS's observed tracks and official forecasts; GDACS's disaster alerts are a layer (ADR 0022).
   - The ocean beneath a chosen place (currents and temperature by depth, from the US Navy's HYCOM model) is requested on demand through the local server and drawn as a current profiler's record ([ADR 0023](development/decisions/0023-ocean-column-and-data-on-demand.md)).
+  - The solid Earth ([ADR 0024](development/decisions/0024-the-solid-earth.md)):
+    - tectonic plates (PB2002) moving by NNR-MORVEL56, with their boundaries and the relative motion across them;
+    - GPS velocities of some 20,000 stations, relative to their plates by ITRF2020's model, and each station's daily record on demand;
+    - 70,000 earthquake mechanisms (Global CMT) as beach balls;
+    - the crust beneath a place (CRUST1.0);
+    - sections across plate boundaries;
+    - geophysics as a field of `core/domains/` and `applications/`, proposed there, which awaits the user's agreement.
   - The laboratory's own models run in the page by the spectral transform method and are verified against analyses and persistence: the barotropic vorticity equation of the first numerical forecast (1950), and the shallow-water equations, started by a digital filter ([ADR 0019](development/decisions/0019-shallow-water-model.md)).
   - Satellite imagery (VIIRS, Blue Marble, Black Marble lights at night) or a relief map forms the base, with finer imagery, or shaded relief from 30 m elevations, fetched for the region in view ([ADR 0018](development/decisions/0018-fine-relief-at-close-range.md)).
   - Climate: Köppen–Geiger classes from 1901 to 2099 under four scenarios, and where they change; monthly normals; a climate diagram for any place on land; and our own classification of the normals, verified against the published map ([ADR 0017](development/decisions/0017-climate-classes-and-normals.md)).
-  - Its provisional JavaScript core is tested against JPL Horizons, Meeus, the Equal Earth paper, the Rossby–Haurwitz wave, Beck et al. (2023), Williamson et al.'s shallow-water tests, constructed cyclones and ocean columns, and the real products: 124 checks, run with `node applications/geography/earth-atlas/tests/run-tests.mjs`.
+  - Its provisional JavaScript core is tested against JPL Horizons, Meeus, the Equal Earth paper, the Rossby–Haurwitz wave, Beck et al. (2023), Williamson et al.'s shallow-water tests, constructed cyclones, ocean columns and double couples, the EarthScope plate calculator, Global CMT, and the real products: 151 checks, run with `node applications/geography/earth-atlas/tests/run-tests.mjs`.
 - `data/` is a general data library ([ADR 0012](development/decisions/0012-selectable-parameterised-datasets.md), [ADR 0014](development/decisions/0014-earth-atlas-separated-data-and-typed-layers.md)):
   - Manifests choose which data and how much: fixed files (or members of remote archives), TAP catalogue queries, ERDDAP grid subsets, THREDDS model subsets (NCSS), OPeNDAP subsets, or web requests, with parameters (including relative times) and profiles.
   - The TAP client serves ESA Gaia, CDS VizieR and SIMBAD. The ERDDAP client serves NOAA's forecasts, analyses and relief. The World Bank, the USGS, NOAA's NOMADS and GDACS are reached by web requests, which may follow links in their results.
   - `data/formats/netcdf3.py` reads netCDF classic files with the standard library, and writes them.
-  - Products are of ten kinds (stars, galaxies, geography, fields, indicators, events, imagery, classes, tracks, columns); all but columns, made on demand, are listed in an index that applications read.
+  - Products are of fourteen kinds (stars, galaxies, geography, fields, indicators, events, imagery, classes, tracks, plates, stations, crust, and, made on demand and not indexed, columns and series), listed in an index that applications read.
   - `data/products/ai_forecast.py` runs an AI weather model to make a field product.
   - Data too large to fetch ahead, such as the column beneath a place, are requested on demand: a manifest's `on_demand` block, `data/acquisition/on_demand.py`, and the application's local server (ADR 0023).
 - There is no C++ code yet.

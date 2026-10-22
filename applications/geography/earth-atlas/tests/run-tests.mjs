@@ -649,6 +649,20 @@ const random = seeded(20261022);
       if (c === 'SUB') { tally.close[1]++; if (x.divergence < 0) tally.close[0]++; }
       if ((c === 'OTF' || c === 'CTF') && Math.abs(birdLateral) > 2) { tally.lateral[1]++; if (Math.sign(birdLateral) === Math.sign(x.rightLateral)) tally.lateral[0]++; }
     }
+    // No net rotation: the plates' motions, weighted by area, sum to no rotation of the whole
+    // surface, w_net = (3 / 8 pi) sum_P int_P (I - r r^T) w_P dA (Argus and Gordon 1991).
+    const net = [0, 0, 0], RAD = Math.PI / 180;
+    for (let j = 0; j < H; j++) {
+      const lat = 90 - ((j + 0.5) * 180) / H, dA = Math.cos(lat * RAD) * (Math.PI / H) * ((2 * Math.PI) / W);
+      for (let i = 0; i < W; i++) {
+        const lon = -180 + ((i + 0.5) * 360) / W;
+        const r = [Math.cos(lat * RAD) * Math.cos(lon * RAD), Math.cos(lat * RAD) * Math.sin(lon * RAD), Math.sin(lat * RAD)];
+        const w = omega(poleOf(m.plates[raster[j * W + i] - 1].code));
+        const rw = r[0] * w[0] + r[1] * w[1] + r[2] * w[2];
+        for (let k = 0; k < 3; k++) net[k] += (w[k] - r[k] * rw) * dA;
+      }
+    }
+    check('plates: NNR-MORVEL56 on PB2002 has no net rotation (against the Pacific’s 0.651°/Myr)', (Math.hypot(...net) * 3) / (8 * Math.PI) / RAD, 0.002, '°/Myr');
     const share = ([a2, n]) => a2 / n;
     assert('plates: spreading ridges and rifts open (at least 99 %)', share(tally.open) >= 0.99, `${tally.open[0]} of ${tally.open[1]}`);
     assert('plates: subduction zones close (at least 99 %)', share(tally.close) >= 0.99, `${tally.close[0]} of ${tally.close[1]}`);
