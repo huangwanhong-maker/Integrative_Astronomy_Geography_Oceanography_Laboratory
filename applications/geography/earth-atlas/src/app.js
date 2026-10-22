@@ -579,14 +579,21 @@ function placeCard() {
     const rows = [['Sun overhead at', coords(sub.lon, sub.lat)]];
     const def = surface.def;
     if (def && def.kind === 'field' && surface.product) {
-      const p = surface.product, b = p.bracket(t, def.variables[0]);
-      const mean = (name) => {
+      const mean = (p, name) => {
+        const b = p.bracket(t, name);
         const a = areaMean(p.slice(name, Math.max(0, b.i0)), p.grid);
         return b.w > 0 ? a + (areaMean(p.slice(name, b.i1), p.grid) - a) * b.w : a;
       };
-      if (def.variables.length === 1) {
-        const m = mean(def.variables[0]);
-        if (Number.isFinite(m)) rows.push([`Mean ${def.label.charAt(0).toLowerCase()}${def.label.slice(1)}`, `${format(toShown(m, surface.unit))} ${esc(surface.unit.unit)}`]);
+      const label = `${def.label.charAt(0).toLowerCase()}${def.label.slice(1)}`;
+      if (def.variables.length === 1 && surface.compare) {
+        // A difference of models: both means are over the whole globe, so their
+        // difference is the mean of the difference (in units without offset).
+        const c = surface.compare;
+        const m = mean(surface.product, def.variables[0]) - mean(c.product, c.def.variables[0]);
+        if (Number.isFinite(m)) rows.push([`Mean difference in ${label}`, `${format(toShown(m, surface.unit))} ${esc(surface.unit.unit)}`]);
+      } else if (def.variables.length === 1) {
+        const m = mean(surface.product, def.variables[0]);
+        if (Number.isFinite(m)) rows.push([`Mean ${label}`, `${format(toShown(m, surface.unit))} ${esc(surface.unit.unit)}`]);
       }
     } else if (def && def.kind === 'indicator' && surface.product) {
       const w = surface.product.aggregates.WLD;
