@@ -137,6 +137,70 @@ def decode(data: bytes) -> list[tuple[str, str, list[tuple[str, int]], np.ndarra
     return out
 
 
+def coordinate(url: str, name: str, timeout: int = 120) -> np.ndarray:
+    """The values of a one-dimensional coordinate variable."""
+    arrays = decode(_get(request_url(url, name, ""), timeout))
+    return arrays[0][3].astype(np.float64)
+
+
+CF_TIME = re.compile(r"\s*(seconds|minutes|hours|days)\s+since\s+(\d{4}-\d{1,2}-\d{1,2})(?:[ T](\d{1,2}:\d{2}(?::\d{2}(?:\.\d*)?)?))?", re.I)
+SECONDS = {"seconds": 1, "minutes": 60, "hours": 3600, "days": 86400}
+
+
+def cf_epoch_seconds(values: np.ndarray, units: str) -> np.ndarray:
+    """Times in seconds since 1970-01-01 UTC from CF values and units ('hours since 2026-10-12 12:00:00 UTC')."""
+    import datetime as dt
+    m = CF_TIME.match(units)
+    if not m:
+        raise DapError(f"time units {units!r} are not understood")
+    unit, day, clock = m.groups()
+    y, mo, d = (int(x) for x in day.split("-"))
+    hh, mm, ss = 0, 0, 0.0
+    if clock:
+        parts = clock.split(":")
+        hh, mm = int(parts[0]), int(parts[1])
+        ss = float(parts[2]) if len(parts) > 2 else 0.0
+    epoch = dt.datetime(y, mo, d, hh, mm, tzinfo=dt.timezone.utc).timestamp() + ss
+    return epoch + np.asarray(values, np.float64) * SECONDS[unit.lower()]
+
+
+def runs(indices: list[int], longest: int) -> list[tuple[int, int, int]]:
+    """Indices as hyperslab runs (start, stride, last) of at most `longest` indices each."""
+    out, i = [], 0
+    while i < len(indices):
+        stride = indices[i + 1] - indices[i] if i + 1 < len(indices) else 1
+        j = i + 1
+        while j < len(indices) and j - i < longest and indices[j] - indices[j - 1] == stride:
+            j += 1
+        out.append((indices[i], max(1, stride), indices[j - 1]))
+        i = j
+    return out
+
+
+def fetch_slabs(tasks: list[tuple[str, str, str]], workers: int = 4, timeout: int = 600) -> list[np.ndarray]:
+    """The values of each (dataset url, variable, constraint), requested in parallel.
+
+    A server that opens one file per time step answers a long request slowly;
+    several short ones at once share the work (about three times faster with
+    four, on the HYCOM server). Results are in the order of the tasks.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(task: tuple[str, str, str]) -> np.ndarray:
+        url, variable, constraint = task
+        for attempt in range(3):
+            try:
+                arrays = decode(_get(request_url(url, variable, constraint), timeout))
+                return next(a for _, name, _, a in arrays if name == variable)
+            except (OSError, DapError):
+                if attempt == 2:
+                    raise
+        raise DapError("unreachable")
+
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        return list(pool.map(one, tasks))
+
+
 def fetch_to_netcdf(url: str, variable: str, stride: int, dest: Path, timeout: int = 900) -> dict:
     """A strided subset of one variable (and its coordinates) as a netCDF classic file.
 

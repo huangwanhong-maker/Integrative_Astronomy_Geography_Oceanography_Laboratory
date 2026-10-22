@@ -26,7 +26,7 @@ Data of different kinds are kept apart ([ADR 0014](../development/decisions/0014
 | Module | Scope | Status |
 |---|---|---|
 | [`registry/`](registry/) | One manifest per dataset: source, licence, checksum or query, parameters, profiles. The schema is in its README. | draft |
-| [`acquisition/`](acquisition/) | `fetch.py`: fixed files, catalogue queries, gridded subsets and web requests into `data/cache/`, with `retrieval.json`. `erddap.py`: a client for ERDDAP's griddap. `ncss.py`: a client for THREDDS's NetCDF Subset Service. `opendap.py`: a client for OPeNDAP (DAP2) servers. `remotezip.py`: members of zip archives on the web, by range requests. | draft |
+| [`acquisition/`](acquisition/) | `fetch.py`: fixed files, catalogue queries, gridded subsets and web requests into `data/cache/`, with `retrieval.json`. `erddap.py`: a client for ERDDAP's griddap. `ncss.py`: a client for THREDDS's NetCDF Subset Service. `opendap.py`: a client for OPeNDAP (DAP2) servers, for strided grids or the column beneath a place. `remotezip.py`: members of zip archives on the web, by range requests. `on_demand.py`: requests made while an application waits (§3.1). | draft |
 | [`catalogs/`](catalogs/) | `tap.py`: a minimal client for the IVOA Table Access Protocol, used for ESA Gaia, CDS VizieR and SIMBAD | draft |
 | [`formats/`](formats/) | Readers and writers: netCDF classic (`netcdf3.py`). FITS, netCDF-4/HDF5 and Zarr are planned. | draft |
 | [`products/`](products/) | Derived artefacts, built reproducibly from registered datasets, and their index `index.json` (§4). `ai_forecast.py` runs an AI weather model to make one. | draft |
@@ -59,6 +59,22 @@ python data/acquisition/fetch.py pangu-weather gfs-analysis-0p25 # an AI model's
 
 The cache, `data/cache/`, is not under version control.
 
+### 3.1 Requests on Demand
+
+Some data cannot be fetched ahead of time, such as the ocean beneath a place a user has just chosen: one column out of millions. A manifest offers itself for such requests with an `on_demand` block (the parameters a request may set, a product builder, a typical duration). `on_demand.py` runs requests as jobs, checks their parameters against the manifest, shares identical requests, runs two at a time, and caches retrievals and products as any others ([ADR 0023](../development/decisions/0023-ocean-column-and-data-on-demand.md)). A local server exposes them to its pages; the Earth Atlas's does at `/request`:
+
+```
+http://127.0.0.1:8790/request?dataset=hycom-column&lat=32&lon=135     starts the request, or finds it
+http://127.0.0.1:8790/request/<job id>                                its state; when done, the product's path
+```
+
+The same column from the command line:
+
+```
+python data/acquisition/fetch.py hycom-column --set lat=32 --set lon=135
+python data/products/ocean_column.py --profile custom-<hash>
+```
+
 ## 4. Products
 
 Products are written to `data/cache/products/` and listed by kind in `index.json`, which applications read.
@@ -72,6 +88,7 @@ Products are written to `data/cache/products/` and listed by kind in `index.json
 | `classes` | `class_raster.py` | A category per cell of a regular grid, such as climate classes, by period and scenario; the legend (code, name, the authors' colour) and the share of land in each class | `.bin` (uint8, 0 for no value) and `.json` |
 | `indicators` | `country_indicators.py` | A value per economy and year, keyed by World Bank codes with ISO alpha-2; aggregates kept apart | `.json` |
 | `events` | `event_catalog.py`, `disaster_catalog.py` | Events at a place and an instant. Earthquakes (`earthquake`): time, longitude, latitude, depth, magnitude. Disasters (`disaster`): start and last update, a point, the kind (tropical cyclone, earthquake, flood, volcano, drought, wildfire), GDACS's alert level, severity, countries. | `.json` |
+| `columns` | `ocean_column.py` | The ocean beneath a place: currents and temperature by depth and time, at a model's grid point, with its latest run and deepest level. Made on demand, kept in `products/columns/`, not listed in the index. | `.json` |
 | `tracks` | `disaster_catalog.py` | Moving things, as positions over time. Tropical cyclones (`cyclone`): positions every 6 or 12 hours, each marked observed or forecast by the responsible warning centre. | `.json` |
 | `imagery` | `imagery.py`, `body_maps.py` | Equirectangular images with a role. Shaded relief of the land (`relief-shading`), with its grey levels of water and flat land, for detail at close range. The Earth (`day`, `night-lights`): true colour of a day (gaps filled from the day before), the Blue Marble, the Black Marble, with the provider's service for detail. Other bodies (`body`), Saturn's rings (`rings`, a radial strip) and the whole sky in galactic coordinates (`sky`, its orientation checked against bright stars). | `.jpg` or `.png`, and `.json` |
 
@@ -106,6 +123,7 @@ Products are written to `data/cache/products/` and listed by kind in `index.json
 | `gfs-analysis-0p25` | http | NOAA NCEP, via the NOMADS GRIB filter | The GFS analysis at 0.25° and 13 levels, to start an AI model |
 | `pangu-weather` | files | Bi et al. 2023 (Huawei Cloud), via ECMWF | The AI model Pangu-Weather, 24 h and 6 h, as ONNX (CC BY-NC-SA 4.0: never committed, never used commercially) |
 | `gdacs` | http (following links) | GDACS (UN and EC JRC) | Disasters of the last month with alert levels; tracks and official forecast tracks of tropical cyclones |
+| `hycom-column` | opendap (a column), on demand | US Navy, ESPC-D-V02 (HYCOM), via HYCOM.org | The ocean beneath a place: currents and temperature at 40 levels to 5000 m, two days back and four ahead |
 
 ### 5.2 Planned
 

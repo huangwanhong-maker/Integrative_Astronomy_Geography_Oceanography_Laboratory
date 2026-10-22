@@ -17,7 +17,7 @@ Manifests are read by [`../acquisition/fetch.py`](../acquisition/fetch.py). It d
 | `griddap` | A subset of a gridded dataset served by ERDDAP: which variables, which times, how fine a grid | `gfs`, `oisst`, `ww3`, `etopo-2022` |
 | `http` | One or more web requests built from URL templates, and optionally those the results link to | `worldbank-indicators`, `usgs-earthquakes`, `gibs-daily`, `gibs-static`, `gibs-relief`, `gfs-analysis-0p25`, `gdacs` |
 | `ncss` | Groups of variables of a forecast model's collection on a THREDDS server, by its NetCDF Subset Service: levels, times and grid spacing | `gfs-levels`, `aigfs`, `aigefs` |
-| `opendap` | One variable from each of several datasets on an OPeNDAP (DAP2) server, every n-th point of the grid, saved as netCDF classic | `terraclimate-normals` |
+| `opendap` | One variable from each of several datasets on an OPeNDAP (DAP2) server, every n-th point of the grid, or the column beneath a place, saved as netCDF classic | `terraclimate-normals`, `hycom-column` |
 
 All kinds except `files` declare parameters and profiles, so that a user chooses which part of a dataset to take and how much of it ([ADR 0012](../../development/decisions/0012-selectable-parameterised-datasets.md)).
 
@@ -129,7 +129,22 @@ Times run from `start` to `end` every `step_hours`, aligned to 00:00 UTC. A prod
 
 The parameter `stride` takes every n-th point along the horizontal dimensions (`lat`, `lon` and their synonyms), and every point along the others. The subset is a point sample, not an area mean. The fetcher reads the dataset's structure and attributes (DDS and DAS), requests the hyperslab in binary (DAP2), and writes it with the variable's attributes and coordinates.
 
-## 10. Usage
+**Columns.** With a `column` block (`{lat, lon, depth, time, run}`: the names of the coordinates, `run` optional), the fetcher takes instead the column at the grid point nearest the parameters `lat` and `lon` (longitudes compared on the circle). It takes the depths down to `max_depth`, and the times from `start` to `end` on multiples of `step_hours` since 00:00 UTC; CF time units are read from the DAS. Times are requested in runs of at most four, `workers` requests at a time (default 4), and each variable is written as netCDF with dimensions (time, depth), times in seconds since 1970, and the grid point's coordinates as global attributes.
+
+## 10. Requests on Demand
+
+A manifest may offer itself for requests made while an application waits:
+
+| Field | Meaning |
+|---|---|
+| `on_demand.parameters` | The parameters a request may set; the others keep their defaults |
+| `on_demand.builder` | The module of `data/products` whose `build(folder, manifest)` makes the product, returning its path |
+| `on_demand.seconds` | How long a request usually takes, to tell the user |
+| `on_demand.description` | What a request gives |
+
+See `data/acquisition/on_demand.py` and [ADR 0023](../../development/decisions/0023-ocean-column-and-data-on-demand.md).
+
+## 11. Usage
 
 ```
 python data/acquisition/fetch.py --list                               # datasets, parameters, profiles

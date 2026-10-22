@@ -501,11 +501,118 @@ def acquire_ncss(manifest: dict, profile: str | None, overrides: dict, refresh: 
     return True
 
 
+def column_indices(axis: dict, values: dict, present: dt.datetime) -> dict:
+    """Indices of the grid point nearest (lat, lon), of the depths down to max_depth,
+    and of the times from start to end on multiples of step_hours (UTC)."""
+    import numpy as np
+    lat, lon = float(values["lat"]), float(values["lon"])
+    i_lat = int(np.argmin(np.abs(axis["lat"] - lat)))
+    # Longitudes compared on the circle, whatever the axis's convention (0..360 or -180..180).
+    gap = np.abs(((axis["lon"] - lon) + 180.0) % 360.0 - 180.0)
+    i_lon = int(np.argmin(gap))
+    depths = [i for i, z in enumerate(axis["depth"]) if z <= float(values.get("max_depth", 1e9)) + 1e-6]
+    step = int(values.get("step_hours", 3))
+    start = ncss.align(resolve_time(values["start"], present), step)
+    end = ncss.align(resolve_time(values["end"], present), step)
+    lo, hi = start.timestamp(), end.timestamp()
+    times = [i for i, t in enumerate(axis["time"])
+             if np.isfinite(t) and lo - 1 <= t <= hi + 1 and round(t) % (step * 3600) == 0]
+    return {"lat": i_lat, "lon": i_lon, "depth": depths, "time": times,
+            "start": start.isoformat().replace("+00:00", "Z"), "end": end.isoformat().replace("+00:00", "Z")}
+
+
+def acquire_opendap_column(manifest: dict, values: dict, tag: str, refresh: bool) -> bool:
+    """A column (time x depth) at the grid point nearest a place, for one variable of
+    each of several OPeNDAP datasets, each saved as a netCDF classic file.
+
+    The manifest's `column` names the coordinates (lat, lon, depth, time, and
+    optionally run, the forecast reference time of each time). Times are asked
+    for in short runs, several at once (`workers`), which suits servers that
+    open one file per time step.
+    """
+    import numpy as np
+    import opendap
+    netcdf3 = opendap.netcdf3
+    folder = CACHE / manifest["id"] / tag
+    names = manifest["column"]
+    base = manifest["service"].rstrip("/")
+    present = dt.datetime.now(UTC)
+    print(f"  profile {tag}: " + ", ".join(f"{k}={v}" for k, v in values.items()))
+    try:
+        axes, requests = {}, []
+        for item in manifest["datasets"]:
+            url = f"{base}/{item['path']}"
+            if url not in axes:
+                attrs = opendap.das(url)
+                axis = {k: opendap.coordinate(url, names[k]) for k in ("lat", "lon", "depth")}
+                axis["time"] = opendap.cf_epoch_seconds(opendap.coordinate(url, names["time"]), attrs[names["time"]]["units"])
+                if names.get("run"):
+                    axis["run"] = opendap.cf_epoch_seconds(opendap.coordinate(url, names["run"]), attrs[names["run"]]["units"])
+                axes[url] = (axis, attrs, column_indices(axis, values, present))
+            axis, attrs, idx = axes[url]
+            if not idx["time"]:
+                raise opendap.DapError(f"no times of {item['path']} between {idx['start']} and {idx['end']}")
+            depth = f"[{idx['depth'][0]}:1:{idx['depth'][-1]}]"
+            point = f"[{idx['lat']}][{idx['lon']}]"
+            constraints = [f"[{a}:{s}:{b}]{depth}{point}" for a, s, b in opendap.runs(idx["time"], 4)]
+            requests.append({"url": opendap.request_url(url, item["variable"], constraints[0]), "dataset": url,
+                             "variable": item["variable"], "file": item["file"], "constraints": constraints})
+    except (opendap.DapError, KeyError, urllib.error.URLError, OSError) as error:
+        print(f"  REQUEST FAILED: {error}")
+        return False
+    if cached(folder, [r["url"] for r in requests], [r["file"] for r in requests]) and not refresh:
+        print(f"  cached in {folder.relative_to(DATA.parent)}")
+        return True
+    folder.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
+    # Every variable's runs of times in one pool, so that all of them overlap.
+    tasks = [(r["dataset"], r["variable"], c) for r in requests for c in r["constraints"]]
+    print(f"  {len(tasks)} requests for {len(requests)} variable(s), {int(manifest.get('workers', 4))} at a time")
+    try:
+        results = iter(opendap.fetch_slabs(tasks, int(manifest.get("workers", 4))))
+    except (opendap.DapError, urllib.error.URLError, OSError) as error:
+        print(f"  REQUEST FAILED: {error}")
+        return False
+    for r in requests:
+        axis, attrs, idx = axes[r["dataset"]]
+        parts = [next(results) for _ in r.pop("constraints")]
+        data = np.concatenate([p.reshape(p.shape[0], p.shape[1]) for p in parts]).astype(np.float32)
+        va = {k: v for k, v in attrs.get(r["variable"], {}).items() if k not in ("coordinates", "NAVO_code") and not k.startswith("_")}
+        for key in ("_FillValue", "missing_value"):
+            fill = attrs.get(r["variable"], {}).get(key)
+            if fill is not None and np.isfinite(fill):
+                data[data == np.float32(fill)] = np.nan
+        times = axis["time"][idx["time"]]
+        variables = {
+            "time": (["time"], times, {"units": "seconds since 1970-01-01 00:00:00 UTC", "standard_name": "time"}),
+            "depth": (["depth"], axis["depth"][idx["depth"]], {"units": "m", "positive": "down", "standard_name": "depth"}),
+            r["variable"]: (["time", "depth"], data, va),
+        }
+        if "run" in axis:
+            variables["run"] = (["time"], axis["run"][idx["time"]], {"units": "seconds since 1970-01-01 00:00:00 UTC",
+                                                                      "standard_name": "forecast_reference_time"})
+        glob = {"source": f"{r['dataset']} (OPeNDAP), {r['variable']} at one grid point",
+                "latitude": float(axis["lat"][idx["lat"]]), "longitude": float(axis["lon"][idx["lon"]]),
+                "requested_latitude": float(values["lat"]), "requested_longitude": float(values["lon"])}
+        netcdf3.write(folder / r["file"], {"time": len(times), "depth": len(idx["depth"])}, variables, glob)
+        r["times"] = len(times)
+    first = next(iter(axes.values()))
+    resolved = {"start": first[2]["start"], "end": first[2]["end"],
+                "grid_latitude": float(first[0]["lat"][first[2]["lat"]]),
+                "grid_longitude": float(first[0]["lon"][first[2]["lon"]])}
+    write_provenance(folder, manifest, tag, values, resolved, requests, started)
+    print(f"  {len(requests)} file(s) in {time.monotonic() - started:.0f} s, in {folder.relative_to(DATA.parent)}")
+    return True
+
+
 def acquire_opendap(manifest: dict, profile: str | None, overrides: dict, refresh: bool) -> bool:
     """One variable from each of several OPeNDAP datasets, every stride-th point
-    of the horizontal grid, each saved as a netCDF classic file (needs numpy)."""
+    of the horizontal grid, each saved as a netCDF classic file (needs numpy);
+    or, with a `column`, the column beneath one place (acquire_opendap_column)."""
     import opendap
     values, tag = resolve(manifest, profile, overrides)
+    if manifest.get("column"):
+        return acquire_opendap_column(manifest, values, tag, refresh)
     folder = CACHE / manifest["id"] / tag
     stride = int(values.get("stride", 1))
     print(f"  profile {tag}: " + ", ".join(f"{k}={v}" for k, v in values.items()))
