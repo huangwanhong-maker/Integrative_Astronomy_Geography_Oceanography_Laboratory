@@ -3,7 +3,7 @@
 This is a long-term programme to learn, use and research astronomy, geography, oceanography and meteorology as one connected body of knowledge, in both theory and practice. Geometry, mathematics and physics form the shared foundation.
 
 <p align="center">
-<a href="docs/gallery.md"><img src="assets/gallery/earth-01-wind.jpg" width="32%" alt="Wind over the North Atlantic in the Earth Atlas"></a>
+<a href="docs/gallery.md"><img src="assets/gallery/earth-15-cyclone-forecasts.jpg" width="32%" alt="Forecast tracks of a typhoon from several models, including an AI model run by the laboratory, in the Earth Atlas"></a>
 <a href="docs/gallery.md"><img src="assets/gallery/earth-08-koppen.jpg" width="32%" alt="Köppen–Geiger climate classes over Asia in the Earth Atlas"></a>
 <a href="docs/gallery.md"><img src="assets/gallery/celestial-02-saturn.jpg" width="32%" alt="Saturn in the Celestial Atlas"></a>
 </p>
