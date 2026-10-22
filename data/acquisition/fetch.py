@@ -232,6 +232,9 @@ def coerce(name: str, spec: dict, raw):
         raise SystemExit(f"parameter {name}: expected {kind}, got {raw!r}") from None
     if "min" in spec and value < spec["min"] or "max" in spec and value > spec["max"]:
         raise SystemExit(f"parameter {name}: {value} is outside [{spec.get('min')}, {spec.get('max')}]")
+    # A text parameter may be held to a pattern, as one that names a file on a server must be.
+    if kind == "str" and spec.get("pattern") and not re.fullmatch(spec["pattern"], value):
+        raise SystemExit(f"parameter {name}: {value!r} does not match {spec['pattern']}")
     return value
 
 

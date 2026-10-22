@@ -26,7 +26,7 @@ import { koppen, koppenQuantities, koppenGrid, KOPPEN_CODES, dryMonths, meanTemp
 import { ClassRaster } from '../src/core/grid.js';
 import { precipitationScale, climateDiagram } from '../src/ui/climate.js';
 import { inertialPeriodHours, flowToward, mixedLayerDepth, columnSampler, symmetricRange, atDepth } from '../src/core/ocean.js';
-import { NNR_MORVEL56, poleOf, omega, poleOfOmega, velocityAt, subtract, acrossStep, azimuth, morvelCode } from '../src/core/plates.js';
+import { NNR_MORVEL56, poleOf, omega, poleOfOmega, velocityAt, subtract, acrossStep, azimuth, morvelCode, itrfOmega, itrfVelocityAt } from '../src/core/plates.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../../../..');
@@ -652,6 +652,45 @@ const random = seeded(20261022);
     assert('plates: transforms slip in the sense Bird (2003) gives (at least 98 %)', share(tally.lateral) >= 0.98, `${tally.lateral[0]} of ${tally.lateral[1]}`);
   } else {
     console.log('skip  plates: plates-pb2002 missing');
+  }
+}
+
+// ---- GPS stations ---------------------------------------------------------------------
+{
+  // ITRF2020's plate motion model against the EarthScope calculator (model itrf2020, which
+  // leaves out the origin rate bias): the Pacific plate at 19.5 N, 155.5 W, retrieved 2026-10-22.
+  const v = velocityAt(itrfOmega('PA'), -155.5, 19.5);
+  check('gnss: the ITRF2020 plate motion model against the EarthScope calculator', Math.max(Math.abs(v.east + 62.24), Math.abs(v.north - 33.90)), 0.006, 'mm/yr');
+  const sm = resolve(products, 'stations-ngl-midas.json');
+  if (existsSync(sm)) {
+    const d = JSON.parse(readFileSync(sm, 'utf8'));
+    const f = Object.fromEntries(d.fields.map((k, i) => [k, i]));
+    // Stations deep in four stable plates move by tenths of a millimetre a year relative to them.
+    const boxes = { Australia: ['AU', 120, 150, -35, -20], 'North America': ['NA', -95, -75, 30, 40], Europe: ['EU', 5, 20, 45, 52], 'South America': ['SA', -55, -40, -25, -10] };
+    const medians = {};
+    for (const [name, [code, w, e, so, n]] of Object.entries(boxes)) {
+      const res = [];
+      for (const r of d.stations) {
+        const lon = r[f.lon], lat = r[f.lat];
+        if (lon < w || lon > e || lat < so || lat > n) continue;
+        const pv = itrfVelocityAt(code, lon, lat);
+        res.push(Math.hypot(r[f.ve] - pv.east, r[f.vn] - pv.north));
+      }
+      res.sort((x, y) => x - y);
+      medians[name] = +res[res.length >> 1].toFixed(2);
+    }
+    assert('gnss: stations in stable plate interiors move less than 1 mm/yr relative to their plate (median)',
+      Object.values(medians).every((m) => m < 1), JSON.stringify(medians));
+    const sp = resolve(products, 'series/series-ngl-p123.json');
+    if (existsSync(sp)) {
+      const sr = JSON.parse(readFileSync(sp, 'utf8'));
+      const years = (Date.parse(sr.days[sr.days.length - 1]) - Date.parse(sr.days[0])) / (365.25 * 86400000);
+      const st = d.stations.find((r) => r[f.id] === 'P123');
+      const de = Math.abs(sr.components[0].values.at(-1) / years - st[f.ve]), dn = Math.abs(sr.components[1].values.at(-1) / years - st[f.vn]);
+      check('gnss: P123’s 20-year record moves at its MIDAS velocity', Math.max(de, dn), 0.5, 'mm/yr');
+    }
+  } else {
+    console.log('skip  gnss: stations-ngl-midas missing');
   }
 }
 

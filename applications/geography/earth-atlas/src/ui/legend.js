@@ -11,7 +11,7 @@ function tickText(v) {
   return Number.isInteger(v) ? String(v) : format(v, 2);
 }
 
-export function renderLegend(el, { surface, flow, lines, events, tracks, plates }) {
+export function renderLegend(el, { surface, flow, lines, events, tracks, plates, stations }) {
   const parts = [];
   if (surface && surface.kind === 'classes') {
     // One column per main class (A tropical, B arid, C temperate, D cold, E polar).
@@ -43,6 +43,15 @@ export function renderLegend(el, { surface, flow, lines, events, tracks, plates 
     if (flow) rows.push(`<div class="title"><span>${esc(flow.title)}</span><span class="unit">moving</span></div>${flow.note ? `<div class="note">${esc(flow.note)}</div>` : ''}${flow.offset ? `<div class="note offset">${esc(flow.offset)}</div>` : ''}`);
     if (lines) rows.push(`<div class="title"><span>${esc(lines.title)}</span><span class="unit">${esc(lines.unit)}</span></div>${lines.note ? `<div class="note">${esc(lines.note)}</div>` : ''}`);
     parts.push(`<div>${rows.join('<div style="height:6px"></div>')}</div>`);
+  }
+  if (stations) {
+    const [arrow] = stations.keys;
+    const dots = stations.dots.map(([label, rgb]) => `<span><i style="background:rgb(${rgb.map(Math.round).join(',')})"></i>${esc(label)}</span>`).join('');
+    parts.push(`<div>
+      <div class="title"><span>${esc(stations.title)}</span><span class="unit">${esc(stations.count)}</span></div>
+      <div class="keys"><span><i class="arrow" style="width:${Math.round(arrow.length)}px"></i>${esc(arrow.label)}</span>${dots}</div>
+      <div class="note">${esc(stations.note)}</div>
+    </div>`);
   }
   // Kinds of line, each with its colour: plate boundaries, cyclone tracks.
   for (const set of [plates, tracks]) {

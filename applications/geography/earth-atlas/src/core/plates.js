@@ -74,6 +74,30 @@ export const PB2002_TO_MORVEL = {
 export const morvelCode = (pb2002) => PB2002_TO_MORVEL[pb2002] || pb2002;
 export const poleOf = (pb2002) => POLES.get(morvelCode(pb2002)) || null;
 
+// The plate motion model of ITRF2020 (Altamimi, Métivier, Rebischung, Collilieux,
+// Chanard and Altamimi 2023, Geophys. Res. Lett. 50, e2023GL106373), estimated
+// from GNSS velocities in the frame of ITRF2020 itself: for the 13 plates it
+// covers, the Cartesian angular velocity (ωx, ωy, ωz) in milliarcseconds a year,
+// as transcribed in PROJ's data file ITRF2020 (MIT licence), and the model's
+// origin rate bias (mm/yr), to be added to ω × r to predict ITRF2020 velocities.
+// It describes the present motion in the stations' own frame, so it, and not the
+// geological NNR-MORVEL56, is the plate to subtract from a GPS velocity: stations
+// in stable interiors then move by a few tenths of a millimetre a year.
+export const ITRF2020_PMM = {
+  AM: [-0.131, -0.551, 0.837], AN: [-0.269, -0.312, 0.678], AR: [1.129, -0.146, 1.438], AU: [1.487, 1.175, 1.223],
+  CA: [0.207, -1.422, 0.726], EU: [-0.085, -0.519, 0.753], IN: [1.137, 0.013, 1.444], NZ: [-0.327, -1.561, 1.605],
+  NA: [0.045, -0.666, -0.098], AF: [0.090, -0.585, 0.717], PA: [-0.404, 1.021, -2.154], SA: [-0.261, -0.282, -0.157],
+  SO: [-0.081, -0.719, 0.864],
+};
+export const ITRF2020_ORIGIN_RATE_BIAS = [0.37, 0.35, 0.74];          // mm/yr, X, Y, Z
+const MAS_PER_YR = (Math.PI / 180 / 3600 / 1000) * 1e6;               // 1 mas/yr in rad/Myr
+
+// The angular velocity (rad/Myr) of a PB2002 plate in ITRF2020's model, or null.
+export function itrfOmega(pb2002) {
+  const w = ITRF2020_PMM[pb2002];
+  return w ? w.map((x) => x * MAS_PER_YR) : null;
+}
+
 // WGS 84: semi-major axis (m) and the square of the first eccentricity.
 const A = 6378137, FLAT = 1 / 298.257223563, E2 = FLAT * (2 - FLAT);
 
@@ -108,6 +132,19 @@ export function velocityAt(w, lon, lat) {
   return {
     east: -Math.sin(l) * v[0] + Math.cos(l) * v[1],
     north: -Math.sin(p) * Math.cos(l) * v[0] - Math.sin(p) * Math.sin(l) * v[1] + Math.cos(p) * v[2],
+  };
+}
+
+// The velocity (mm/yr) that ITRF2020's model predicts for a point of a plate,
+// origin rate bias included; null for a plate it does not cover.
+export function itrfVelocityAt(pb2002, lon, lat) {
+  const w = itrfOmega(pb2002);
+  if (!w) return null;
+  const v = velocityAt(w, lon, lat);
+  const [tx, ty, tz] = ITRF2020_ORIGIN_RATE_BIAS, l = lon * DEG, p = lat * DEG;
+  return {
+    east: v.east - Math.sin(l) * tx + Math.cos(l) * ty,
+    north: v.north - Math.sin(p) * Math.cos(l) * tx - Math.sin(p) * Math.sin(l) * ty + Math.cos(p) * tz,
   };
 }
 

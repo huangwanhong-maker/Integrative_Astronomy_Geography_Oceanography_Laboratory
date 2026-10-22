@@ -123,6 +123,13 @@ export function buildPanel(el, catalogue, state, years, extra, on) {
   if (extra.plates) {
     html.push('<h3>Solid Earth</h3>');
     html.push(`<label class="check"><input type="checkbox" data-plates${state.plates ? ' checked' : ''}> Plate boundaries and names</label>`);
+    if (extra.stations) {
+      html.push(`<label class="check"><input type="checkbox" data-stations${state.stations ? ' checked' : ''}> GPS stations: how the ground moves</label>`);
+      if (state.stations) {
+        html.push(`<div class="segmented sub-choice">${[['plate', 'Relative to their plates'], ['igs', 'IGS20']]
+          .map(([k, l]) => `<button type="button" data-station-frame="${k}" aria-pressed="${state.stationFrame === k}">${l}</button>`).join('')}</div>`);
+      }
+    }
   }
   if (catalogue.tracks.length) {
     html.push('<h3>Cyclones</h3>');
@@ -200,6 +207,8 @@ export function buildPanel(el, catalogue, state, years, extra, on) {
   const cmp = el.querySelector('select[data-compare]');
   if (cmp) cmp.addEventListener('change', () => on.compare(cmp.value || null));
   el.querySelectorAll('input[data-plates]').forEach((i) => i.addEventListener('change', () => on.plates(i.checked)));
+  el.querySelectorAll('input[data-stations]').forEach((i) => i.addEventListener('change', () => on.stations(i.checked)));
+  el.querySelectorAll('button[data-station-frame]').forEach((b) => b.addEventListener('click', () => on.stationFrame(b.dataset.stationFrame)));
   el.querySelectorAll('input[data-track]').forEach((i) => i.addEventListener('change', () => on.track(i.dataset.track, i.checked)));
   el.querySelectorAll('input[data-events]').forEach((i) => i.addEventListener('change', () => on.events(i.checked ? i.dataset.events : null)));
   el.querySelectorAll('button[data-events-window]').forEach((b) => b.addEventListener('click', () => on.events(b.dataset.eventsWindow)));

@@ -191,6 +191,9 @@ export class Stage {
       this.orthographic.position.set(0, 0, 5);
       this.orthographic.updateProjectionMatrix();
     }
+    // At once, not at the next render: names and arrows are placed on the screen
+    // (screen()) earlier in the frame than the scene is drawn.
+    this.camera.updateMatrixWorld();
     this.revision++;
     this.emit('change');
   }

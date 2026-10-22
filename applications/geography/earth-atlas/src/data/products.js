@@ -99,6 +99,16 @@ export class Library {
     return this.plateSets.get(entry.name);
   }
 
+  // A stations product (GPS velocities), read once.
+  stationSet(name) {
+    if (!this.stationSets) this.stationSets = new Map();
+    if (!this.stationSets.has(name)) {
+      const entry = this.list('stations').find((e) => e.name === name);
+      this.stationSets.set(name, json(`${this.base}/${entry.file}`));
+    }
+    return this.stationSets.get(name);
+  }
+
   // A class product computed in the application, offered like one from the library.
   addClasses(raster) {
     this.classMeta.set(raster.meta.name, raster.meta);
