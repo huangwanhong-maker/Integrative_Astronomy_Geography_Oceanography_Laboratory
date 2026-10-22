@@ -27,6 +27,7 @@ import { ClassRaster } from '../src/core/grid.js';
 import { precipitationScale, climateDiagram } from '../src/ui/climate.js';
 import { inertialPeriodHours, flowToward, mixedLayerDepth, columnSampler, symmetricRange, atDepth } from '../src/core/ocean.js';
 import { NNR_MORVEL56, poleOf, omega, poleOfOmega, velocityAt, subtract, acrossStep, azimuth, morvelCode, itrfOmega, itrfVelocityAt } from '../src/core/plates.js';
+import { mechanism, tensorNED, eigenSymmetric, radiation, fromEqualArea, toEqualArea, planeDifference } from '../src/core/moment.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../../../..');
@@ -691,6 +692,64 @@ const random = seeded(20261022);
     }
   } else {
     console.log('skip  gnss: stations-ngl-midas missing');
+  }
+}
+
+// ---- earthquake mechanisms --------------------------------------------------------
+{
+  // A double couple from strike, dip and rake (Aki and Richards 2002, eqs. 4.88, 4.89), in the
+  // catalogue's elements (r up, t south, p east): M = n d^T + d n^T in (north, east, down).
+  const R = Math.PI / 180;
+  const doubleCouple = (strike, dip, rake) => {
+    const f = strike * R, dl = dip * R, l = rake * R;
+    const n = [-Math.sin(dl) * Math.sin(f), Math.sin(dl) * Math.cos(f), -Math.cos(dl)];
+    const d = [Math.cos(l) * Math.cos(f) + Math.sin(l) * Math.cos(dl) * Math.sin(f), Math.cos(l) * Math.sin(f) - Math.sin(l) * Math.cos(dl) * Math.cos(f), -Math.sin(l) * Math.sin(dl)];
+    const M = (i, j) => n[i] * d[j] + d[i] * n[j];
+    return { mtt: M(0, 0), mtp: -M(0, 1), mrt: M(0, 2), mpp: M(1, 1), mrp: -M(1, 2), mrr: M(2, 2) };
+  };
+  // (45, 70, 45): T plunges 45°, N 42°, P 13°, none steep enough for a pure class.
+  const cases = [['thrust', 20, 30, 90], ['normal', 120, 55, -90], ['strike-slip', 300, 89, 5], ['oblique', 45, 70, 45]];
+  let worst = 0;
+  const kinds = [];
+  for (const [kind, strike, dip, rake] of cases) {
+    const m = mechanism(doubleCouple(strike, dip, rake));
+    const target = { strike, dip, rake };
+    worst = Math.max(worst, Math.min(planeDifference(m.planes[0], target), planeDifference(m.planes[1], target)));
+    kinds.push(m.kind === kind);
+  }
+  // acos of a cosine within 1e-16 of 1 resolves angles to about 1e-6 degrees.
+  check('mechanisms: a fault recovered from its double couple', worst, 1e-5, '°');
+  assert('mechanisms: thrust, normal, strike-slip and oblique by the plunges of the axes (Frohlich 1992)', kinds.every(Boolean), JSON.stringify(kinds));
+  // Eigenvalues of a double couple: 1, 0, -1; T in a quadrant of compression, P of dilatation.
+  const dc = doubleCouple(20, 30, 90), e = eigenSymmetric(tensorNED(dc));
+  check('mechanisms: the eigenvalues of a unit double couple are 1, 0, -1', Math.abs(e[0].value - 1) + Math.abs(e[1].value) + Math.abs(e[2].value + 1), 1e-12);
+  assert('mechanisms: P waves push along T and pull along P', radiation(tensorNED(dc), e[0].vector) > 0 && radiation(tensorNED(dc), e[2].vector) < 0);
+  let round = 0;
+  for (let i = 0; i < 50; i++) {
+    const x = random() * 1.4 - 0.7, y = random() * 1.4 - 0.7;
+    const [x2, y2] = toEqualArea(fromEqualArea(x, y));
+    round = Math.max(round, Math.hypot(x2 - x, y2 - y));
+  }
+  check('mechanisms: the equal-area projection, there and back', round, 1e-12);
+  const gm = resolve(products, 'events-gcmt.json');
+  if (existsSync(gm)) {
+    const g = JSON.parse(readFileSync(gm, 'utf8'));
+    const f = Object.fromEntries(g.fields.map((k, i) => [k, i]));
+    const diffs = [];
+    for (const r of g.events) {
+      const m = mechanism({ mrr: r[f.mrr], mtt: r[f.mtt], mpp: r[f.mpp], mrt: r[f.mrt], mrp: r[f.mrp], mtp: r[f.mtp] });
+      const theirs = [{ strike: r[f.strike1], dip: r[f.dip1] }, { strike: r[f.strike2], dip: r[f.dip2] }];
+      diffs.push(Math.min(Math.max(planeDifference(m.planes[0], theirs[0]), planeDifference(m.planes[1], theirs[1])),
+        Math.max(planeDifference(m.planes[0], theirs[1]), planeDifference(m.planes[1], theirs[0]))));
+    }
+    diffs.sort((x, y) => x - y);
+    check(`mechanisms: nodal planes of all ${g.count.toLocaleString('en-GB')} Global CMT events against the catalogue's (99th percentile)`, diffs[Math.floor(0.99 * (diffs.length - 1))], 1.0, '°');
+    const tohoku = g.events.find((r) => r[f.name] === 'M201103110546A');
+    const mt = mechanism({ mrr: tohoku[f.mrr], mtt: tohoku[f.mtt], mpp: tohoku[f.mpp], mrt: tohoku[f.mrt], mrp: tohoku[f.mrp], mtp: tohoku[f.mtp] });
+    assert('mechanisms: Tohoku 2011 (Mw 9.1) is a thrust on a plane dipping 10° west-north-west',
+      mt.kind === 'thrust' && Math.abs(tohoku[f.mw] - 9.08) < 0.01 && planeDifference(mt.planes[0], { strike: 203, dip: 10 }) < 1, JSON.stringify(mt.planes[0]));
+  } else {
+    console.log('skip  mechanisms: events-gcmt missing');
   }
 }
 

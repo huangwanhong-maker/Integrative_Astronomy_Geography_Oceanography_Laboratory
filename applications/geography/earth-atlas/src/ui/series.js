@@ -98,7 +98,8 @@ export class SeriesFigure {
       this.relative ? `without the ${st.residual.plate.name} plate’s rigid motion (${st.residual.model})` : 'in IGS20 (ITRF2020)',
       'displacement from the first day',
     ].join(' · ');
-    const quakes = this.events.length ? ` Dashed: earthquakes of magnitude ${this.events.minMw ?? 6.5} and more within ${this.events.radius ?? 500} km (Global CMT).` : '';
+    const where = typeof this.events.radius === 'number' ? `within ${this.events.radius} km` : this.events.radius;
+    const quakes = this.events.length ? ` Dashed: earthquakes of magnitude ${this.events.minMw ?? 6.5} and more ${where} (Global CMT).` : '';
     this.host.querySelector('.caption').textContent =
       `Dots: daily positions; line: the station’s MIDAS velocity (Blewitt et al. 2016), ${Math.hypot(st.ve, st.vn).toFixed(1)} mm/yr horizontally and ${st.vu.toFixed(1)} mm/yr up. A step is an earthquake or new equipment; a yearly wave, the load of water and snow.${quakes} Source: ${p.source.credit}.`;
   }

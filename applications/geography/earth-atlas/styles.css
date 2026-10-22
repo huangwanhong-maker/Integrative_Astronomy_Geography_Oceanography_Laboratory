@@ -116,6 +116,10 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) 330px; min-height: 0
 #legend .classes i { display: inline-block; width: 10px; height: 8px; border-radius: 1px; margin-right: 5px; vertical-align: -0.5px; }
 #legend .keys i.line { width: 16px; height: 0; border-radius: 0; box-shadow: none; border-top: 2px solid var(--c); vertical-align: 3px; }
 #legend .keys i.line.dashed { border-top-style: dashed; }
+#legend .keys i.ball { background: conic-gradient(var(--c) 0 25%, #fbf1ea 0 50%, var(--c) 0 75%, #fbf1ea 0); box-shadow: 0 0 0 1px #2b1d2d; }
+.stereonet { display: block; margin: 4px auto 0; }
+.stereonet text { font: italic 11px var(--serif); fill: var(--text); paint-order: stroke; stroke: rgba(18, 13, 20, 0.85); stroke-width: 2.5px; }
+.stereonet .north { text-anchor: middle; fill: var(--text-dim); stroke: none; font-style: normal; }
 #legend .keys i.arrow { position: relative; height: 0; border-radius: 0; box-shadow: none; border-top: 1.5px solid #fff3e6; vertical-align: 3px; margin-right: 10px; }
 #legend .keys i.arrow::after { content: ''; position: absolute; right: -2px; top: -5px; border: 4px solid transparent; border-left: 7px solid #fff3e6; border-right: 0; }
 #layers .track-key { display: inline-block; width: 18px; height: 3px; border-radius: 2px; vertical-align: 3px; margin: 0 2px; }

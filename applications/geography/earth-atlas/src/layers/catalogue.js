@@ -226,6 +226,8 @@ export function buildCatalogue(library) {
     tracks.push({ id: `tracks:${e.name}`, kind: 'official', label: 'Observed and official forecast', model: (e.source && e.source.credit) || e.title, product: e.name, source: e.source });
   }
   for (const e of library.list('events')) {
+    // Mechanisms have a layer of their own (src/layers/mechanisms.js).
+    if (e.kind === 'mechanism') continue;
     events.push({ id: e.name, label: e.title, kind: e.kind, product: e.name, count: e.count, window: e.window, domain: e.domain });
   }
   const order = ['meteorology', 'oceanography', 'climate', 'geography', 'geophysics'];

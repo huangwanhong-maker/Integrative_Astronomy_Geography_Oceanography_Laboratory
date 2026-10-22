@@ -11,7 +11,7 @@ function tickText(v) {
   return Number.isInteger(v) ? String(v) : format(v, 2);
 }
 
-export function renderLegend(el, { surface, flow, lines, events, tracks, plates, stations }) {
+export function renderLegend(el, { surface, flow, lines, events, tracks, plates, stations, mechanisms }) {
   const parts = [];
   if (surface && surface.kind === 'classes') {
     // One column per main class (A tropical, B arid, C temperate, D cold, E polar).
@@ -51,6 +51,14 @@ export function renderLegend(el, { surface, flow, lines, events, tracks, plates,
       <div class="title"><span>${esc(stations.title)}</span><span class="unit">${esc(stations.count)}</span></div>
       <div class="keys"><span><i class="arrow" style="width:${Math.round(arrow.length)}px"></i>${esc(arrow.label)}</span>${dots}</div>
       <div class="note">${esc(stations.note)}</div>
+    </div>`);
+  }
+  if (mechanisms) {
+    const keys = mechanisms.keys.map((k) => `<span><i class="ball" style="--c:${k.colour}"></i>${esc(k.label)}</span>`).join('');
+    parts.push(`<div>
+      <div class="title"><span>${esc(mechanisms.title)}</span><span class="unit">${esc(mechanisms.count)}</span></div>
+      <div class="keys">${keys}</div>
+      <div class="note">${esc(mechanisms.note)}</div>
     </div>`);
   }
   // Kinds of line, each with its colour: plate boundaries, cyclone tracks.

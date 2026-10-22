@@ -18,6 +18,10 @@ import { EventsLayer } from './layers/events.js';
 import { TracksLayer } from './layers/tracks.js';
 import { PlatesLayer, MOTION_PRODUCT } from './layers/plates.js';
 import { StationsLayer } from './layers/stations.js';
+import { MechanismsLayer, KIND_COLOURS } from './layers/mechanisms.js';
+import { mechanism } from './core/moment.js';
+import { stereonet } from './ui/stereonet.js';
+import { arcDeg } from './core/cyclones.js';
 import { SeriesFigure } from './ui/series.js';
 import { Requests } from './data/requests.js';
 import { ImageryLayer, DetailLayer } from './layers/imagery.js';
@@ -46,6 +50,7 @@ const state = {
   projection: 'globe',
   surface: null, compare: null, flow: null, lines: 'none', events: null, indicator: null, tracks: [], plates: false,
   stations: false, stationFrame: 'plate', station: null,
+  mechanisms: false, mechanismMode: 'year', quake: null,
   style: 'relief', night: true, lights: true, clouds: false,
   coast: true, borders: true, rivers: true, graticule: false, labels: true, reliefOnData: true,
   lang: 'en',
@@ -54,7 +59,7 @@ const state = {
 };
 
 let library, catalogue, stage, base, surface, flow, lines, events, labels, timeline, geography, elevation, tracks;
-let imagery, detail, labModel, detailSource = null, ocean, plates, stations, series;
+let imagery, detail, labModel, detailSource = null, ocean, plates, stations, series, mechanisms;
 const asked = new Requests();       // data requested on demand for the place card, other than the ocean's
 const lab = { input: null, running: null, progress: 0, runs: {}, start: null, against: '', error: '' };
 const MODEL_COLOURS = ['#CA8DBE', '#f6c47e', '#9fb6e8', '#8fd1b4', '#e8a0a0'];
@@ -132,6 +137,8 @@ async function start() {
   ocean = new OceanBeneath($('figure'), { onChange: () => { dirty.place = true; } });
   stations = new StationsLayer(stage, library, plates);
   stations.setMode(state.stationFrame);
+  mechanisms = new MechanismsLayer(stage, library);
+  mechanisms.setMode(state.mechanismMode);
   series = new SeriesFigure($('series'));
 
   progress(0.5, 'Reading the forecast…');
@@ -150,6 +157,7 @@ async function start() {
   if (state.clouds) applyBase('clouds');
   plates.show(state.plates);
   if (state.stations) await stations.show(true);
+  if (state.mechanisms) await mechanisms.show(true);
   setProjection(state.projection, true);
   setTime(state.live ? Date.now() : state.time);
   renderPanel();
@@ -300,6 +308,7 @@ function renderPanel() {
     modelColour,
     plates: Boolean(plates && plates.plates),
     stations: library.list('stations').length > 0,
+    mechanisms: library.list('events').some((e) => e.kind === 'mechanism'),
     ai: [...library.fieldMeta.values()].filter((m) => m.verification && m.verification.start).map((m) => ({
       label: m.model, short: m.model.replace(/ \(laboratory\)$/, '').replace(/ hindcast$/, ''),
       start: Date.parse(m.verification.start), leads: m.verification.leads,
@@ -320,6 +329,14 @@ function renderPanel() {
       await stations.show(on);
       dirty.legend = dirty.place = true; renderPanel(); remember();
     },
+    mechanisms: async (on) => {
+      state.mechanisms = on;
+      if (!on) state.quake = null;
+      await mechanisms.show(on);
+      mechanisms.layout(state.time);
+      dirty.legend = dirty.place = true; renderPanel(); remember();
+    },
+    mechanismMode: (mode) => { state.mechanismMode = mode; mechanisms.setMode(mode); mechanisms.layout(state.time); dirty.legend = true; renderPanel(); remember(); },
     stationFrame: (mode) => { state.stationFrame = mode; stations.setMode(mode); dirty.legend = dirty.place = true; renderPanel(); remember(); },
     year: (step) => {
       const p = surface.product;
@@ -374,6 +391,7 @@ function setProjection(mode, initial = false) {
   tracks.update(state.time, true);
   if (plates.built) plates.rebuild();
   stations.stale = true;
+  mechanisms.stale = true;
   dirty.labels = true;
   remember();
 }
@@ -486,10 +504,13 @@ function bind() {
   });
   stage.on('click', (place) => {
     if (!place) return;
-    // A GPS station under the pointer is chosen with its place.
-    const s = stations.shown ? stage.screen(place[0], place[1]) : null;
-    const st = s ? stations.pick(s[0], s[1]) : null;
+    // An earthquake's mechanism, or else a GPS station, under the pointer is chosen with its place.
+    const s = stage.screen(place[0], place[1]);
+    const quake = s && mechanisms.shown ? mechanisms.pick(s[0], s[1]) : null;
+    const st = s && !quake && stations.shown ? stations.pick(s[0], s[1]) : null;
+    state.quake = quake ? quake.row[mechanisms.f.name] : null;
     state.station = st ? st.id : null;
+    if (quake) place = [quake.lon, quake.lat];
     if (st) place = [st.lon, st.lat];
     state.pinned = [place[0], place[1]];
     dirty.place = dirty.labels = true;
@@ -727,7 +748,26 @@ function placeCard() {
   }
   const climate = climateAt(lon, lat);
   for (const [term, html, kind] of climate.rows) add('climate', term, html, kind);
-  // The solid Earth: a GPS station chosen, the plate, its motion, and the nearest plate boundary.
+  // The solid Earth: an earthquake chosen, a GPS station chosen, the plate, its motion, and the nearest plate boundary.
+  const quake = state.quake && mechanisms.find(state.quake);
+  let quakeFigure = null;
+  if (quake) {
+    const f = mechanisms.f, r = quake.row, mech = mechanism(quake.elements);
+    const when = new Date(quake.t).toISOString().slice(0, 16).replace('T', ' ');
+    add('geophysics', 'Earthquake', `M ${quake.mw.toFixed(1)} <span class="dir">${when} UTC</span>`);
+    add('geophysics', '', `${esc(r[f.region])}, ${r[f.depth_km].toFixed(0)} km deep (centroid)${r[f.quick] ? '; a quick solution' : ''}`, 'gloss');
+    const words = { thrust: 'thrust: one side pushed up over the other, where the crust is squeezed', normal: 'normal: one side dropped, where the crust is stretched', 'strike-slip': 'strike-slip: the two sides slid past each other', oblique: 'oblique: thrust or normal and sliding at once' };
+    add('geophysics', 'Faulting', `<span style="color:${KIND_COLOURS[mech.kind]}">${mech.kind}</span>`);
+    add('geophysics', '', words[mech.kind], 'gloss');
+    const plane = (p) => `${p.strike.toFixed(0)}° / ${p.dip.toFixed(0)}° / ${p.rake.toFixed(0)}°`;
+    add('geophysics', 'Nodal planes', `${plane(mech.planes[0])} <span class="dir">and</span> ${plane(mech.planes[1])}`);
+    add('geophysics', '', 'strike / dip / rake: one plane is the fault, the other auxiliary; the waves alone cannot tell which', 'gloss');
+    const axis = (a) => `${a.plunge.toFixed(0)}° toward ${a.azimuth.toFixed(0)}°`;
+    add('geophysics', 'Pressure axis', axis(mech.axes.P));
+    add('geophysics', 'Tension axis', axis(mech.axes.T));
+    quakeFigure = { svg: stereonet(mech, quake.m, KIND_COLOURS[mech.kind]), caption: 'Lower hemisphere, equal area, north up: coloured where the first motion of P waves is a push; the two nodal planes; P and T axes. Global CMT.' };
+  }
+  // A GPS station chosen.
   const st = state.station && stations.find(state.station);
   if (st) {
     for (const [term, html, kind] of stations.rows(st)) add('geophysics', term, html, kind);
@@ -764,7 +804,7 @@ function placeCard() {
     sub: sub2,
     pinned: true,
     rows,
-    sections: ordered.map(([heading, r]) => ({ heading, rows: r, figure: heading === DOMAINS.climate ? climate.figure : null })),
+    sections: ordered.map(([heading, r]) => ({ heading, rows: r, figure: heading === DOMAINS.climate ? climate.figure : heading === DOMAINS.geophysics ? quakeFigure : null })),
     series,
     models: palette.length > 1 ? palette.map((m, i) => ({ model: m, colour: MODEL_COLOURS[i % MODEL_COLOURS.length] })) : null,
   };
@@ -779,7 +819,10 @@ function showStationSeries(id) {
     dirty.place = true;
     if (entry.product && state.station === id) {
       ocean.figure.hide();
-      series.show(entry.product, st, []);
+      // Earthquakes near enough to have moved the station measurably, if the catalogue is at hand.
+      const quakes = mechanisms.near(st.lon, st.lat, (a, b, c, d) => arcDeg(a, b, c, d) * 111.195);
+      Object.assign(quakes, { minMw: 6, radius: 'near enough to move the ground here measurably (within 40 km at magnitude 6, 400 km at 8)' });
+      series.show(entry.product, st, quakes);
     }
   };
   const known = asked.get(key);
@@ -874,6 +917,7 @@ function legendData() {
   }
   if (state.plates && plates.plates) out.plates = plates.legend();
   if (state.stations && stations.product) out.stations = stations.legend();
+  if (state.mechanisms && mechanisms.product) out.mechanisms = mechanisms.legend();
   if (tracks.sources.length) {
     const keys = tracks.sources.flatMap((s) => (s.def.kind === 'official'
       ? [{ label: 'observed', colour: s.colour }, { label: 'official forecast', colour: s.colour, dashed: true }]
@@ -915,6 +959,7 @@ function updateCredits() {
   for (const s of tracks.sources) if (s.def.kind === 'official' && s.def.source) credits.add(s.def.source.credit);
   if (state.plates && plates.meta) credits.add(plates.meta.source.credit);
   if (state.stations && stations.product) credits.add(stations.product.source.credit);
+  if (state.mechanisms && mechanisms.product) credits.add(mechanisms.product.source.credit);
   $('credits').textContent = [...credits].filter(Boolean).join(' · ');
 }
 
@@ -971,6 +1016,7 @@ function renderAbout() {
   if (catalogue.normals.length) rows.push(`<dt>Climate</dt><dd>Climate classes follow Köppen (1936) as revised by Peel et al. (2007) and Beck et al. (2018): the arid group first, then the tropical, polar, temperate and cold groups, with summer the warmer half-year. Besides the published maps, the atlas classifies the ${esc(catalogue.normals[0].model)} normals itself, with the mean temperature of a month taken as the mean of its daily maximum and minimum; the two agree in about nine land cells in ten. Climate diagrams follow Walter and Lieth (1960): 10 °C to 20 mm, dry where precipitation falls below twice the temperature (Gaussen).</dd>`);
   if (plates.meta) rows.push(`<dt>Tectonic plates</dt><dd>The outlines of 52 plates and the classes of their boundaries are Bird's model PB2002 (as converted by H. Ahlenius, Nordpil; ODC Attribution licence). Each plate turns rigidly about its pole, at the rate of NNR-MORVEL56 (Argus, Gordon and DeMets 2011), relative to the no-net-rotation frame, the mean motion of the whole surface: a point moves at ω × r, computed here on the WGS 84 ellipsoid. Bird's Africa takes MORVEL's Nubia; MORVEL's Capricorn, Lwandle, Macquarie and Sur, which PB2002 does not outline, move with the plates containing them. Across a boundary the relative motion is resolved into opening (or closing) and sliding, right- or left-lateral. <i>Bird, P. (2003), G-cubed 4(3), 1027; Argus, D. F., Gordon, R. G. and DeMets, C. (2011), G-cubed 12, Q11001.</i></dd>`);
   if (library.list('stations').length) rows.push(`<dt>GPS stations</dt><dd>The velocities of some 20,000 continuous GNSS stations, estimated by MIDAS (Blewitt et al. 2016) at the Nevada Geodetic Laboratory, in IGS20, aligned with ITRF2020; kept where a station has run for two years or more with horizontal uncertainties of 2 mm/yr or less. Relative to its plate, a station's velocity is less the motion of the plate it stands on (NNR-MORVEL56; ITRF2020's own rotation against the no-net-rotation frame, a fraction of a millimetre a year, remains). A station's daily positions are asked for on demand. No licence is stated; data are supplied as is. <i>Blewitt, G., Hammond, W. C. and Kreemer, C. (2018), Eos 99, doi:10.1029/2018EO104623.</i></dd>`);
+  if (library.list('events').some((e) => e.kind === 'mechanism')) rows.push(`<dt>Earthquake mechanisms</dt><dd>The centroid moment tensors of the Global CMT Project, about 70,000 earthquakes since 1976 (final solutions, and the quick ones of the present year). Each is drawn as a beach ball: the lower hemisphere of the source in equal-area projection, north up, coloured where the first motion of P waves is a push. Its axes and nodal planes are computed here from the tensor's eigenvectors (they agree with the catalogue's own to within a degree), and it is called thrust, normal or strike-slip by the plunges of its axes (Frohlich 1992). <i>Dziewonski, Chou and Woodhouse (1981), J. Geophys. Res. 86, 2825; Ekström, Nettles and Dziewonski (2012), Phys. Earth Planet. Inter. 200-201, 1.</i></dd>`);
   rows.push(`<dt>The ocean beneath a place</dt><dd>Asked for on demand, through this atlas's server and the laboratory's data library, from the US Navy's global ocean model (ESPC-D-V02, its ocean HYCOM on a 1/12° grid with 40 levels to 5000 m) on HYCOM.org's OPeNDAP server: the column at the model's grid point nearest the place, every 6 hours from two days back to four ahead. Approved for public release, distribution unlimited; HYCOM was developed with funding from the National Ocean Partnership Program and the Office of Naval Research, and its data-assimilative products are funded by the U.S. Navy. <i>Barton, N., et al. (2021), The Navy's Earth System Prediction Capability, Earth and Space Science 8, e2020EA001199.</i> The mixed layer is where temperature first differs from that at 10 m by 0.2 °C (de Boyer Montégut et al. 2004).</dd>`);
   rows.push(`<dt>Method</dt><dd>Fields are interpolated bilinearly in space and linearly in time between the stored steps; a place near missing values takes the mean of the valid neighbours carrying at least half the weight. Wind direction is the direction it comes from. Wave energy travels at the deep-water group speed g T / 4π along the peak direction. The Sun's position follows the Astronomical Almanac's low-precision formulas (0.01°); day, civil, nautical and astronomical twilight are drawn as bands. Countries are joined to indicators by their World Bank and ISO codes; boundaries are Natural Earth's de facto depiction. The Equal Earth projection keeps areas true.</dd>`);
   $('about-body').innerHTML = `<dl>${rows.join('')}</dl>`;
@@ -1045,6 +1091,8 @@ function remember() {
     if (state.plates) q.set('pb', '1');
     if (state.stations) q.set('gp', state.stationFrame);
     if (state.station) q.set('st', state.station);
+    if (state.mechanisms) q.set('cmt', state.mechanismMode);
+    if (state.quake) q.set('eq', state.quake);
     if (!state.live) q.set('t', new Date(state.time).toISOString().slice(0, 16) + 'Z');
     if (state.pinned) q.set('at', `${state.pinned[0].toFixed(3)},${state.pinned[1].toFixed(3)}`);
     if (state.lang !== 'en') q.set('lang', state.lang);
@@ -1069,6 +1117,8 @@ function restore() {
   if (q.get('pb') === '1') state.plates = true;
   if (['plate', 'igs'].includes(q.get('gp'))) { state.stations = true; state.stationFrame = q.get('gp'); }
   if (/^[A-Z0-9]{4}$/.test(q.get('st') || '')) state.station = q.get('st');
+  if (['year', 'large'].includes(q.get('cmt'))) { state.mechanisms = true; state.mechanismMode = q.get('cmt'); }
+  if (/^[A-Z0-9]{6,16}$/.test(q.get('eq') || '')) state.quake = q.get('eq');
   if (q.get('cl') === '1') state.clouds = true;
   if (q.get('t')) { const t = Date.parse(q.get('t')); if (Number.isFinite(t)) { state.time = t; state.live = false; } }
   if (q.get('at')) { const a = q.get('at').split(',').map(Number); if (a.every(Number.isFinite)) state.pinned = a; }
@@ -1096,10 +1146,14 @@ function loop(now) {
     if (Math.abs(cov - lastCoverage) > 0.25 * Math.max(lastCoverage, 0.05)) { lastCoverage = cov; flow.reset(); }
     flow.step();
   }
-  // GPS arrows are laid out again once the view has settled.
-  if (stations.shown && (stations.stale || (stationsMoved && now - stationsMoved > 140))) {
-    stations.layout(); stationsMoved = 0; dirty.legend = true;
+  // GPS arrows and beach balls are laid out again once the view has settled, and
+  // beach balls when the time shown has moved.
+  const settled = stationsMoved && now - stationsMoved > 140;
+  if (stations.shown && (stations.stale || settled)) { stations.layout(); dirty.legend = true; }
+  if (mechanisms.shown && (mechanisms.stale || settled || Math.abs(state.time - mechanisms.time) > (state.playing ? 6 : 0.5) * HOUR)) {
+    mechanisms.layout(state.time); dirty.legend = true;
   }
+  if (settled) stationsMoved = 0;
   // Names follow the camera, whatever moved it.
   if (stage.revision !== lastRevision) {
     lastRevision = stage.revision;
@@ -1111,7 +1165,7 @@ function loop(now) {
   if ((detail.target || 0) !== lastDetailTarget) { lastDetailTarget = detail.target || 0; dirty.legend = true; }
   if (dirty.labels) { dirty.labels = false; flow.viewChanged(); updateLabels(); }
   const res = stage.resolution;
-  base.frame(res); flow.frame(res); lines.frame(res); events.frame(res); tracks.frame(res); plates.frame(res); stations.frame(res);
+  base.frame(res); flow.frame(res); lines.frame(res); events.frame(res); tracks.frame(res); plates.frame(res); stations.frame(res); mechanisms.frame(res);
   stage.render();
   if (dirty.legend) { dirty.legend = false; renderLegend($('legend'), legendData()); updateCredits(); }
   if (dirty.place && now - lastPlace > (state.playing ? 400 : 120)) {

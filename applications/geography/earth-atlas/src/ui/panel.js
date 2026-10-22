@@ -123,6 +123,13 @@ export function buildPanel(el, catalogue, state, years, extra, on) {
   if (extra.plates) {
     html.push('<h3>Solid Earth</h3>');
     html.push(`<label class="check"><input type="checkbox" data-plates${state.plates ? ' checked' : ''}> Plate boundaries and names</label>`);
+    if (extra.mechanisms) {
+      html.push(`<label class="check"><input type="checkbox" data-mechanisms${state.mechanisms ? ' checked' : ''}> Earthquake mechanisms (Global CMT)</label>`);
+      if (state.mechanisms) {
+        html.push(`<div class="segmented sub-choice">${[['year', 'The past year'], ['large', 'Magnitude 6.5 and more since 1976']]
+          .map(([k, l]) => `<button type="button" data-mechanism-mode="${k}" aria-pressed="${state.mechanismMode === k}">${l}</button>`).join('')}</div>`);
+      }
+    }
     if (extra.stations) {
       html.push(`<label class="check"><input type="checkbox" data-stations${state.stations ? ' checked' : ''}> GPS stations: how the ground moves</label>`);
       if (state.stations) {
@@ -207,6 +214,8 @@ export function buildPanel(el, catalogue, state, years, extra, on) {
   const cmp = el.querySelector('select[data-compare]');
   if (cmp) cmp.addEventListener('change', () => on.compare(cmp.value || null));
   el.querySelectorAll('input[data-plates]').forEach((i) => i.addEventListener('change', () => on.plates(i.checked)));
+  el.querySelectorAll('input[data-mechanisms]').forEach((i) => i.addEventListener('change', () => on.mechanisms(i.checked)));
+  el.querySelectorAll('button[data-mechanism-mode]').forEach((b) => b.addEventListener('click', () => on.mechanismMode(b.dataset.mechanismMode)));
   el.querySelectorAll('input[data-stations]').forEach((i) => i.addEventListener('change', () => on.stations(i.checked)));
   el.querySelectorAll('button[data-station-frame]').forEach((b) => b.addEventListener('click', () => on.stationFrame(b.dataset.stationFrame)));
   el.querySelectorAll('input[data-track]').forEach((i) => i.addEventListener('change', () => on.track(i.dataset.track, i.checked)));
