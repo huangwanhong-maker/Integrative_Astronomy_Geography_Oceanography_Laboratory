@@ -245,7 +245,7 @@ Each module directory contains:
 
 - Record decisions that shape structure, conventions or tooling in `development/decisions/NNNN-slug.md`, using the template in the index.
 - Never rewrite a record. A new record supersedes or amends it, and the old record's status is updated to point to the new one.
-- Records accepted so far: 0001–0021.
+- Records accepted so far: 0001–0022.
 
 ### 6.4 Change Discipline
 
@@ -295,6 +295,10 @@ Each module directory contains:
 - **Licences.** All four repositories are MIT-licensed.
   - Check every external library for licence compatibility before adopting it. Copyleft examples: FFTW, SHTns, FLINT, GMP, and parts of CGAL.
   - Datasets keep their own licences.
+- **Model environment.**
+  - AI models run in `.venv` at the repository root (Python 3.12, not committed), with the packages pinned in `data/products/requirements-models.txt` (ADR 0022).
+  - The rest of the data library needs only the standard library and numpy.
+  - Model weights under non-commercial licences (Pangu-Weather: CC BY-NC-SA 4.0) are fetched into the cache and never committed.
 - **Development machine** (as of 2026-10-21):
   - Windows 11; Intel i7-11370H; 32 GB of memory.
   - NVIDIA RTX 3050 Ti Laptop GPU (4 GB, CUDA 12.9) and Intel Iris Xe.
@@ -318,7 +322,7 @@ Each module directory contains:
 
 As of 2026-10-22:
 
-- The architecture and decision records 0001–0021 are written.
+- The architecture and decision records 0001–0022 are written.
 - The layered directory structure is in place, with READMEs.
 - The three libraries are scaffolded as their own git repositories and attached under `lib/`.
 - All four repositories are published on GitHub.
@@ -336,17 +340,20 @@ As of 2026-10-22:
 - The second application, `applications/geography/earth-atlas`, works ([ADR 0014](development/decisions/0014-earth-atlas-separated-data-and-typed-layers.md)).
   - It shows the Earth's atmosphere, ocean, land and people on a globe or on equal-area and equirectangular maps, at one instant.
   - Its data are separate products, joined only in the application: a base map without thematic values, gridded fields, country indicators and events.
-  - Its layers are typed by the shape of their data (surface, flow, lines, events, base), so new data appear without changes to code.
+  - Its layers are typed by the shape of their data (surface, flow, lines, events, tracks, base), so new data appear without changes to code.
   - Forecasts from several models (GFS, NOAA's AI model AIGFS and the AIGEFS ensemble) can be chosen, compared as differences, and read side by side at a place (ADR 0015).
+  - The laboratory runs an AI model itself: Pangu-Weather, from the GFS analysis at 0.25°, on the CPU, verified against later analyses ([ADR 0022](development/decisions/0022-ai-forecast-cyclones-and-disasters.md)).
+  - Tropical cyclones are found in every forecast's sea-level pressure (after TempestExtremes) and drawn beside GDACS's observed tracks and official forecasts; GDACS's disaster alerts are a layer (ADR 0022).
   - The laboratory's own models run in the page by the spectral transform method and are verified against analyses and persistence: the barotropic vorticity equation of the first numerical forecast (1950), and the shallow-water equations, started by a digital filter ([ADR 0019](development/decisions/0019-shallow-water-model.md)).
   - Satellite imagery (VIIRS, Blue Marble, Black Marble lights at night) or a relief map forms the base, with finer imagery, or shaded relief from 30 m elevations, fetched for the region in view ([ADR 0018](development/decisions/0018-fine-relief-at-close-range.md)).
   - Climate: Köppen–Geiger classes from 1901 to 2099 under four scenarios, and where they change; monthly normals; a climate diagram for any place on land; and our own classification of the normals, verified against the published map ([ADR 0017](development/decisions/0017-climate-classes-and-normals.md)).
-  - Its provisional JavaScript core is tested against JPL Horizons, Meeus, the Equal Earth paper, the Rossby–Haurwitz wave, Beck et al. (2023), Williamson et al.'s shallow-water tests and the real products: 105 checks, run with `node applications/geography/earth-atlas/tests/run-tests.mjs`.
+  - Its provisional JavaScript core is tested against JPL Horizons, Meeus, the Equal Earth paper, the Rossby–Haurwitz wave, Beck et al. (2023), Williamson et al.'s shallow-water tests, constructed cyclones and the real products: 114 checks, run with `node applications/geography/earth-atlas/tests/run-tests.mjs`.
 - `data/` is a general data library ([ADR 0012](development/decisions/0012-selectable-parameterised-datasets.md), [ADR 0014](development/decisions/0014-earth-atlas-separated-data-and-typed-layers.md)):
   - Manifests choose which data and how much: fixed files (or members of remote archives), TAP catalogue queries, ERDDAP grid subsets, THREDDS model subsets (NCSS), OPeNDAP subsets, or web requests, with parameters (including relative times) and profiles.
-  - The TAP client serves ESA Gaia, CDS VizieR and SIMBAD. The ERDDAP client serves NOAA's forecasts, analyses and relief. The World Bank and the USGS are reached by web requests.
+  - The TAP client serves ESA Gaia, CDS VizieR and SIMBAD. The ERDDAP client serves NOAA's forecasts, analyses and relief. The World Bank, the USGS, NOAA's NOMADS and GDACS are reached by web requests, which may follow links in their results.
   - `data/formats/netcdf3.py` reads netCDF classic files with the standard library, and writes them.
-  - Products are of eight kinds (stars, galaxies, geography, fields, indicators, events, imagery, classes), listed in an index that applications read.
+  - Products are of nine kinds (stars, galaxies, geography, fields, indicators, events, imagery, classes, tracks), listed in an index that applications read.
+  - `data/products/ai_forecast.py` runs an AI weather model to make a field product.
 - There is no C++ code yet.
 
 The next step is roadmap Phase 0.
