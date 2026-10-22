@@ -3,6 +3,13 @@
 The page is served from this directory, and the data products from the
 repository's cache (``data/cache/``) under ``/data/``. Only 127.0.0.1 is bound.
 
+Data that cannot be fetched ahead of time, such as the ocean beneath a place
+the user has just chosen, are requested on demand through the data library
+(data/acquisition/on_demand.py):
+
+    /request?dataset=<id>&<parameter>=<value>...   starts a request, or finds it; returns the job as JSON
+    /request/<job id>                                the job's state; when done, the product's path under /data/
+
 Usage::
 
     python applications/geography/earth-atlas/serve.py [--port 8790] [--open]
@@ -14,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import http.server
+import json
 import sys
 import urllib.parse
 import webbrowser
@@ -22,6 +30,16 @@ from pathlib import Path
 APP = Path(__file__).resolve().parent
 ROOT = APP.parents[2]
 DATA = ROOT / "data" / "cache"
+JOBS = None          # the data library's jobs on demand, created at the first request
+
+
+def jobs():
+    global JOBS
+    if JOBS is None:
+        sys.path.insert(0, str(ROOT / "data" / "acquisition"))
+        import on_demand
+        JOBS = on_demand.Jobs()
+    return JOBS
 
 # Explicit types: on Windows the registry may otherwise map .js to text/plain,
 # which browsers refuse for ES modules.
@@ -47,6 +65,32 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if target != base and base not in target.parents:
             return str(base / "__outside__")
         return str(target)
+
+    def do_GET(self) -> None:
+        url = urllib.parse.urlsplit(self.path)
+        if url.path == "/request" or url.path.startswith("/request/"):
+            self.on_demand(url)
+        else:
+            super().do_GET()
+
+    def on_demand(self, url) -> None:
+        try:
+            if url.path == "/request":
+                query = dict(urllib.parse.parse_qsl(url.query))
+                dataset = query.pop("dataset", "")
+                body, code = jobs().request(dataset, query), 200
+            else:
+                body, code = jobs().status(url.path[len("/request/"):]), 200
+        except ImportError as error:
+            body, code = {"state": "failed", "message": f"requests on demand need numpy: {error}"}, 503
+        except ValueError as error:          # RequestError: a refused request
+            body, code = {"state": "failed", "message": str(error)}, 400
+        data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def end_headers(self) -> None:
         # Products are rebuilt in place when data are fetched again, so they are

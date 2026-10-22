@@ -158,7 +158,7 @@ Every directory has a README describing its purpose and planned modules. [`CLAUD
 **Early working stage (2026-10-22).** The architecture is designed, and the four repositories are scaffolded and published. Two applications work; their computation is provisional JavaScript, tested against published references. The [gallery](docs/gallery.md) shows both.
 
 - The [Celestial Atlas](applications/astronomy/celestial-atlas/README.md) shows the Sun, the Moon, the planets, the stars and the galaxies, at any instant from 1849 to 2150. It has 66 checks.
-- The [Earth Atlas](applications/geography/earth-atlas/README.md) shows weather, ocean, climate, relief and people on one globe. Its forecasts include an AI model the laboratory runs itself (Pangu-Weather) and two simple models of its own. Tropical cyclones are tracked in every forecast and compared with their official forecasts, and current disasters are shown by alert level. It has 114 checks.
+- The [Earth Atlas](applications/geography/earth-atlas/README.md) shows weather, ocean, climate, relief and people on one globe. Its forecasts include an AI model the laboratory runs itself (Pangu-Weather) and two simple models of its own. Tropical cyclones are tracked in every forecast and compared with their official forecasts, current disasters are shown by alert level, and the ocean beneath any place can be seen in depth. It has 124 checks.
 
 There is no C++ code yet. The next step is Phase 0 of the [roadmap](development/roadmap.md): the toolchain and the build.
 

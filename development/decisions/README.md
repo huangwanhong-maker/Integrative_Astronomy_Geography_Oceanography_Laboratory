@@ -33,6 +33,7 @@ Decisions that concern only one library are recorded in that library's own `deve
 | [0020](0020-detail-of-bodies-at-close-range.md) | Detail of the Moon, Mars and Mercury at close range | Accepted, provisionally |
 | [0021](0021-the-sky-from-a-place.md) | The sky from a place: choosing where to stand, and links between the atlases | Accepted, provisionally |
 | [0022](0022-ai-forecast-cyclones-and-disasters.md) | An AI weather model run in the laboratory, tropical cyclones tracked, and disaster alerts | Accepted, provisionally |
+| [0023](0023-ocean-column-and-data-on-demand.md) | The ocean beneath a place, and data requested on demand | Accepted, provisionally |
 
 ## 2. Template
 

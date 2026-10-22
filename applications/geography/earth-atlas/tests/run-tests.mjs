@@ -25,6 +25,7 @@ import { detect, stitch, arcDeg, positionAt } from '../src/core/cyclones.js';
 import { koppen, koppenQuantities, koppenGrid, KOPPEN_CODES, dryMonths, meanTemperature } from '../src/core/climate.js';
 import { ClassRaster } from '../src/core/grid.js';
 import { precipitationScale, climateDiagram } from '../src/ui/climate.js';
+import { inertialPeriodHours, flowToward, mixedLayerDepth, columnSampler, symmetricRange, atDepth } from '../src/core/ocean.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../../../..');
@@ -558,6 +559,39 @@ const random = seeded(20261022);
   // Positions between the stored times, across the date line.
   const q = positionAt([{ t: 0, lon: 179, lat: 10, pa: 100000 }, { t: 6, lon: -179, lat: 12, pa: 99000 }], 3);
   check('cyclones: positions interpolate across the date line', Math.abs(Math.abs(q.lon) - 180) + Math.abs(q.lat - 11) + Math.abs(q.pa - 99500) / 100, 1e-9);
+}
+
+// ---- the ocean beneath a place -------------------------------------------------------
+{
+  // At 30 degrees the inertial period is one sidereal day (86 164.1 s), since 2 Omega sin 30 = Omega.
+  check('ocean: the inertial period at 30° is a sidereal day', Math.abs(inertialPeriodHours(30) * 3600 - 86164.1), 0.1, 's');
+  check('ocean: and scales as 1 / sin φ (at 60° S)', Math.abs(inertialPeriodHours(-60) - inertialPeriodHours(30) * Math.sin(Math.PI / 6) / Math.sin(Math.PI / 3)), 1e-12, 'h');
+  const toward = [flowToward(1, 0), flowToward(0, 1), flowToward(-1, 0), flowToward(0, -1), flowToward(1, 1)];
+  assert('ocean: currents are named by where they flow: E 90, N 0, W 270, S 180, NE 45',
+    [90, 0, 270, 180, 45].every((x, i) => Math.abs(toward[i] - x) < 1e-9), toward.join(', '));
+  // Mixed to 50 m at 20 °C, then cooling by 0.01 °C per metre: the 0.2 °C criterion is met at 70 m,
+  // between levels at 60 and 80 m, where linear interpolation is exact.
+  const depths = [0, 2, 5, 10, 20, 30, 50, 60, 80, 100, 150, 200];
+  const profile = depths.map((z) => (z <= 50 ? 20 : 20 - 0.01 * (z - 50)));
+  check('ocean: the mixed layer of a constructed profile', Math.abs(mixedLayerDepth(profile, depths).depth - 70), 1e-9, 'm');
+  const uniform = mixedLayerDepth(depths.map(() => 15).map((x, k) => (k > 9 ? NaN : x)), depths);
+  assert('ocean: a column mixed to its deepest value reaches the bottom', uniform.reachesBottom && uniform.depth === 100, JSON.stringify(uniform));
+  assert('ocean: no mixed layer without a temperature at 10 m', Number.isNaN(mixedLayerDepth(depths.map(() => NaN), depths).depth));
+  check('ocean: a profile between levels', Math.abs(atDepth(profile, depths, 70) - 19.8), 1e-12, '°C');
+  // Bilinear interpolation reproduces f = a + b t + c z + d t z exactly, on unequal steps of time and depth.
+  const times = [0, 3, 9, 12, 24].map((h) => h * 3600000);
+  const f = (t, z) => 1 + 2e-8 * t + 0.003 * z - 4e-11 * t * z;
+  const sample = columnSampler(times, depths, times.map((t) => depths.map((z) => f(t, z))));
+  let worst = 0;
+  for (let i = 0; i < 200; i++) {
+    const t = Math.random() * times[4], z = Math.random() * 200;
+    worst = Math.max(worst, Math.abs(sample(t, z) - f(t, z)));
+  }
+  check('ocean: the column sampler is exact for bilinear fields', worst, 1e-12);
+  // Beneath the deepest value (the sea floor) the sampler gives nothing.
+  const floor = columnSampler(times, depths, times.map(() => depths.map((z) => (z <= 100 ? 1 : null))));
+  assert('ocean: nothing beneath the sea floor', Number.isNaN(floor(5 * 3600000, 140)) && floor(5 * 3600000, 90) === 1);
+  check('ocean: a symmetric range for currents', Math.abs(symmetricRange([-0.33, 0.1, 0.25], { q: 1 }) - 0.4), 1e-12);
 }
 
 // ---- water in shaded relief ---------------------------------------------------------

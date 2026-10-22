@@ -1,6 +1,6 @@
 # Earth Atlas
 
-*Status: draft (2026-10-22). Kind: tool. Field: geography (cartography), showing data from meteorology, oceanography, geography and geophysics.* Decision records: [ADR 0014](../../../development/decisions/0014-earth-atlas-separated-data-and-typed-layers.md), [ADR 0015](../../../development/decisions/0015-earth-atlas-models-imagery-detail.md), [ADR 0017](../../../development/decisions/0017-climate-classes-and-normals.md), [ADR 0018](../../../development/decisions/0018-fine-relief-at-close-range.md), [ADR 0019](../../../development/decisions/0019-shallow-water-model.md), [ADR 0022](../../../development/decisions/0022-ai-forecast-cyclones-and-disasters.md).
+*Status: draft (2026-10-22). Kind: tool. Field: geography (cartography), showing data from meteorology, oceanography, geography and geophysics.* Decision records: [ADR 0014](../../../development/decisions/0014-earth-atlas-separated-data-and-typed-layers.md), [ADR 0015](../../../development/decisions/0015-earth-atlas-models-imagery-detail.md), [ADR 0017](../../../development/decisions/0017-climate-classes-and-normals.md), [ADR 0018](../../../development/decisions/0018-fine-relief-at-close-range.md), [ADR 0019](../../../development/decisions/0019-shallow-water-model.md), [ADR 0022](../../../development/decisions/0022-ai-forecast-cyclones-and-disasters.md), [ADR 0023](../../../development/decisions/0023-ocean-column-and-data-on-demand.md).
 
 The Earth Atlas shows the atmosphere, the ocean, the land and the people of the Earth on one globe, at one instant. Each kind of data comes from its own dataset and is joined to the map only here, in the application. Forecasts from several models can be compared: NOAA's, an AI model the laboratory runs itself, and two simple models of our own that run in the page. Tropical cyclones are found in every forecast and set beside their observed tracks and official forecasts, and current disasters are shown by their alert levels. Climates can be read too: their classes from 1901 to 2099, and the normal year of any place. The map itself is one dataset among others, and carries no values but names and places.
 
@@ -37,6 +37,10 @@ The Earth Atlas shows the atmosphere, the ocean, the land and the people of the 
   - Each forecast's cyclones are found in its sea-level pressure: a minimum with a closed contour of 2 hPa, linked from time to time (after TempestExtremes; Ullrich and Zarzycki 2017). Each model's tracks are drawn in its colour.
   - The observed track and the official forecast come from GDACS, solid and dashed.
   - At the time shown, each cyclone is labelled with its name and each model's central pressure.
+- **The ocean beneath a place.** For a place at sea, the place card offers the column beneath it from the US Navy's ocean model (HYCOM, 1/12°, 40 levels to 5000 m), fetched on demand through the local server in about four minutes the first time. It is drawn as a current profiler's record:
+  - eastward and northward current, and temperature, against depth and time, from two days back to four ahead;
+  - the Sun's height at the place, the start of the forecast, isotherms, the mixed layer and the sea floor;
+  - a reading under the pointer.
 - **Disaster alerts.** GDACS's events of the last month (tropical cyclones, earthquakes, floods, volcanoes, droughts, wildfires) are drawn by alert level. These alerts are automatic, and the atlas is not a warning service.
 - **Our own models.** Two models run in the page from the GFS analysis at 500 hPa:
   - the barotropic vorticity equation, that of the first numerical weather prediction (1950);
@@ -117,6 +121,7 @@ The page also loads three.js from jsDelivr and Source Serif 4 from Google Fonts.
 | Earthquakes | USGS ComCat, magnitude 4.5 and above | `events-usgs-earthquakes-*` | Public domain |
 | An AI forecast run here: surface, 850, 500 and 250 hPa, 1°, every 6 h, a week | Pangu-Weather (Bi et al. 2023), from the GFS analysis at 0.25° (NOAA NCEP, NOMADS) | `fields-pangu-forecast`, `fields-pangu-hindcast` | Weights CC BY-NC-SA 4.0: learning and research only |
 | Disasters of the last month, with alert levels; cyclone tracks, observed and forecast | GDACS (UN and EC JRC), relaying the warning centres | `events-gdacs-month`, `tracks-gdacs-month` | No reuse licence stated: fetched, not redistributed |
+| The ocean beneath a place: currents and temperature by depth | HYCOM ESPC-D-V02 (US Navy, via HYCOM.org), on demand | `columns/column-hycom-column-*` | Public release, distribution unlimited |
 | Climate classes, 1901–2099 | Köppen–Geiger maps of Beck et al. (2023), 0.1°: 1901–1930, 1931–1960, 1961–1990, 1991–2020; 2041–2070 and 2071–2099 under SSP1-2.6, SSP2-4.5, SSP3-7.0 and SSP5-8.5 | `classes-koppen-geiger-*` | CC BY 4.0 |
 | Climate normals, 1991–2020 | TerraClimate (Abatzoglou et al. 2018), monthly daily maximum and minimum temperature and precipitation, every 1/3°, via OPeNDAP | `fields-terraclimate-normals-medium` | CC0 |
 
@@ -133,6 +138,7 @@ The ERDDAP servers add: "The data may be used and redistributed for free but is 
 | Our models | Spectral transform method at T42 (Gaussian grid 128 × 64, FFTs in longitude), Runge–Kutta 4 and ∇⁴ damping. The barotropic vorticity equation in steps of 30 min, heights from linear balance added as changes to the analysis. The shallow-water equations in vorticity–divergence form, in steps of 15 min, from the analysed wind and height after a digital filter of six hours. | `src/core/spectral.js`, `src/core/barotropic.js`, `src/core/shallowwater.js`; theory notes on the [barotropic](../../../theory/meteorology/barotropic-vorticity-model.md) and [shallow-water](../../../theory/meteorology/shallow-water-model.md) models |
 | AI forecast | Pangu-Weather's 24 h and 6 h models (ONNX, onnxruntime on the CPU), composed by hierarchical temporal aggregation in the fewest steps; geopotential as height times 9.80665 m s⁻²; every fourth point kept for 1° | Bi et al. (2023); `data/products/ai_forecast.py`; [theory note](../../../theory/meteorology/learned-forecast-models.md) |
 | Tropical cyclones | A sea-level pressure minimum, lowest within 6°, with a pressure rise of 2 hPa within 5.5° along 16 rays; placed between grid points by a paraboloid; linked within 8° per 6 h, nearest pairs first; kept if it lasts 24 h, deepens to 1000 hPa and begins over the sea within 25° of the equator | Ullrich and Zarzycki (2017); `src/core/cyclones.js`; [theory note](../../../theory/meteorology/tropical-cyclone-tracking.md) |
+| The ocean column | The model's grid point nearest the place; linear in time and depth between its times and levels; mixed layer where temperature first differs from that at 10 m by 0.2 °C; inertial period 2π / f; currents named by where they flow | de Boyer Montégut et al. (2004), Gill (1982); `src/core/ocean.js`, `src/ui/column.js`; [theory note](../../../theory/oceanography/the-ocean-column.md) |
 | Model comparison | Differences on a diverging scale fitted to the 98th percentile over the shared forecast. The model's verification is the root-mean-square height error over 20–80° N, against analyses and against persistence. | `src/layers/surface.js`, `src/layers/labmodel.js` |
 | Day and night | Subsolar point from the Astronomical Almanac's low-precision Sun. Sunrise at −0.833°; civil, nautical and astronomical twilight at −6°, −12° and −18°. Lights from the Black Marble on the night side. | [theory note](../../../theory/astronomy/subsolar-point-and-twilight.md) |
 | Imagery and detail | Global images at 8192 × 4096. Gaps in a daily mosaic are filled from the day before; where imagery has none, the relief shows. At close range, a WMS request covers the region in view at the screen's resolution. | `data/products/imagery.py`, `src/layers/imagery.js` |
@@ -150,7 +156,7 @@ The ERDDAP servers add: "The data may be used and redistributed for free but is 
 node applications/geography/earth-atlas/tests/run-tests.mjs
 ```
 
-There are 114 checks. The checks on real data need the products; without them they are skipped.
+There are 124 checks. The checks on real data need the products; without them they are skipped.
 
 | Quantity | Reference | Agreement |
 |---|---|---|
@@ -177,6 +183,9 @@ There are 114 checks. The checks on real data need the products; without them th
 | Our classes | Beck et al. (2023), 1991–2020, at the 195 203 land cells of the TerraClimate grid | 89.1 % of cells; 95.9 % by main group |
 | Cyclone detection | A Gaussian low of 933 hPa on a 1° grid; a trough open at its ends | Position 0.02°, pressure 0.5 hPa; no candidate in the trough |
 | Cyclone tracks | A cyclone moving for two days; lows born at 35° N, over land, or never deeper than 1000 hPa | One track of 9 positions; the others left out |
+| Inertial period | At 30°, one sidereal day; at 60° S, by 1 / sin φ | 6 × 10⁻⁴ s; exact |
+| Mixed layer | A constructed profile, uniform to 50 m and cooling below (70 m) | 1 × 10⁻¹³ m |
+| Column interpolation | f = a + bt + cz + dtz on unequal times and depths; nothing beneath the sea floor | 9 × 10⁻¹⁶ |
 
 Fetch the reference values again with `python applications/geography/earth-atlas/tests/fetch_fixtures.py`.
 
@@ -194,6 +203,7 @@ The computation in `src/core/` is a provisional stand-in for the laboratory's C+
 | `src/core/barotropic.js` | The barotropic vorticity model; linear balance | `core/domains/meteorology` |
 | `src/core/shallowwater.js` | The shallow-water model; digital-filter initialisation | `core/domains/meteorology` |
 | `src/core/cyclones.js` | Tropical cyclones: detection, linking, positions between times | `core/domains/meteorology` |
+| `src/core/ocean.js` | The ocean column: inertial period, direction of flow, mixed layer, interpolation | `core/domains/oceanography` |
 | `src/core/climate.js` | Köppen–Geiger classes; dry months after Gaussen | `core/domains/climate` (zones) |
 | `src/core/contour.js` | Isolines, highs and lows | `core/domains/geography` |
 | `src/core/raster.js` | Polygons to rasters, areas | `core/domains/geography` (GIS) |
@@ -202,10 +212,11 @@ The computation in `src/core/` is a provisional stand-in for the laboratory's C+
 | `src/core/units.js` | Units for display | physis (units) |
 | `src/core/join.js` | Joins of data to places by key | `core/domains/geography` (GIS) |
 | `src/data/products.js` | Reads products from the data library | — |
+| `src/data/requests.js` | Asks the local server for data on demand, and follows the job | — |
 | `src/layers/` | The catalogue of layers and models; one module per kind of layer; imagery and detail; the laboratory model | `visualization/scene` |
 | `src/workers/` | The laboratory models' integration and the painting of the base map, off the page's main thread | — |
 | `src/render/` | The surface shader, lines, markers, labels, relief, colour maps, colours of classes, the stage | `visualization/renderers` |
-| `src/ui/` | Panel, timeline, legend, place card, climate diagram | — |
+| `src/ui/` | Panel, timeline, legend, place card, climate diagram, the ocean column's record | — |
 
 ## 7. Limits
 
@@ -214,6 +225,7 @@ The computation in `src/core/` is a provisional stand-in for the laboratory's C+
 - The laboratory models have one layer and no topography, moisture or heating. The barotropic model's long waves drift west too fast; the shallow-water model corrects much of that, but neither represents the growth of storms, which needs several levels (the next idea: a primitive-equation model).
 - Cyclone intensities are those of 1° fields, well above the true central pressures; Pangu-Weather underestimates intensity further, as its authors report. Tracks are the more trustworthy part.
 - The cyclone tracker has no warm-core test, so a strong monsoon depression may be counted.
+- The ocean column needs the atlas's own server (`serve.py`), which asks the data library; HYCOM's analyses lag about two days, and a first request takes minutes.
 - The AI forecast starts from the GFS analysis, not the ERA5 it was trained on, and is verified against GFS analyses, which favours forecasts close to the GFS.
 - Fine relief is ASTER's shading, a picture: its elevations are not read, so tints stay those of the 5′ grid. ASTER covers land between about 83° N and 83° S; elsewhere, and on the sea floor, the ETOPO shading remains.
 - Glaciers are drawn from Natural Earth's 1:50 m outlines, coarser than the fine relief.

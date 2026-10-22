@@ -219,6 +219,40 @@ table.verify tbody tr + tr { border-top: 1px solid var(--hair); }
   content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 1.5px; background: var(--accent-gradient);
 }
 
+/* ---- a figure over the map: the ocean beneath a place ---- */
+.figure {
+  position: absolute; left: 16px; right: 16px; bottom: 16px; z-index: 4; height: min(64%, 600px); min-height: 330px;
+  display: grid; grid-template-rows: auto minmax(0, 1fr) auto;
+  background: rgba(24, 18, 26, 0.95); backdrop-filter: blur(8px);
+  border: 1px solid var(--hair); border-radius: 4px; padding: 12px 16px 10px;
+  box-shadow: 0 10px 40px rgba(8, 5, 10, 0.55);
+}
+.figure[hidden] { display: none; }
+.figure-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+.figure-head h3 { margin: 0; font-weight: 500; font-size: 18px; }
+.figure-head .sub { margin: 1px 0 4px; color: var(--text-dim); font-style: italic; font-size: 13px; }
+.figure-controls { display: flex; align-items: center; gap: 22px; flex: none; }
+.figure-controls .segmented { margin: 0; }
+.figure-controls .close { color: var(--text-dim); font-size: 15px; padding: 2px 4px; }
+.figure-controls .close:hover { color: var(--text); }
+.figure-body { position: relative; min-height: 0; }
+.figure-body canvas { position: absolute; inset: 0; display: block; }
+.figure-body .overlay { cursor: crosshair; }
+.figure .readout {
+  position: absolute; z-index: 1; pointer-events: none; width: max-content; max-width: 300px;
+  background: rgba(18, 13, 20, 0.92); border: 1px solid var(--hair); border-radius: 3px;
+  padding: 6px 9px; font-size: 12.5px; line-height: 1.45; color: var(--text);
+}
+.figure .readout[hidden] { display: none; }
+.figure .readout b { font-weight: 600; }
+.figure .readout span { color: var(--text-dim); font-style: italic; }
+.figure .caption { margin: 6px 0 0; font-size: 12px; font-style: italic; color: var(--text-faint); line-height: 1.4; }
+#place .action {
+  color: var(--text); font-size: 13.5px; padding: 1px 0; white-space: normal; text-align: right;
+  text-decoration: underline; text-decoration-color: rgba(202, 141, 190, 0.6); text-underline-offset: 3px;
+}
+#place .action:hover { text-decoration-color: var(--accent); }
+
 /* ---- time bar ---- */
 .timebar { display: grid; grid-template-columns: 250px auto minmax(0, 1fr); align-items: center; gap: 22px; padding: 8px 22px; border-top: 1px solid var(--hair); background: var(--night-2); }
 #time-utc { font-size: 17px; white-space: nowrap; }

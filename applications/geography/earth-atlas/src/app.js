@@ -31,6 +31,7 @@ import { areaMean, ClassRaster } from './core/grid.js';
 import { koppen, koppenGrid, meanTemperature } from './core/climate.js';
 import { climateDiagram } from './ui/climate.js';
 import { joinCountries, valueForYear, latestWellCoveredYear } from './core/join.js';
+import { OceanBeneath } from './ui/ocean.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -47,7 +48,7 @@ const state = {
 };
 
 let library, catalogue, stage, base, surface, flow, lines, events, labels, timeline, geography, elevation, tracks;
-let imagery, detail, labModel, detailSource = null;
+let imagery, detail, labModel, detailSource = null, ocean;
 const lab = { input: null, running: null, progress: 0, runs: {}, start: null, against: '', error: '' };
 const MODEL_COLOURS = ['#CA8DBE', '#f6c47e', '#9fb6e8', '#8fd1b4', '#e8a0a0'];
 const loaded = new Map();          // field products in memory, by name
@@ -118,6 +119,7 @@ async function start() {
   events = new EventsLayer(stage, library);
   tracks = new TracksLayer(stage, library);
   labels = new Labels($('labels'));
+  ocean = new OceanBeneath($('figure'), { onChange: () => { dirty.place = true; } });
 
   progress(0.5, 'Reading the forecast…');
   await Promise.all([
@@ -138,7 +140,7 @@ async function start() {
   renderPanel();
   $('loading').hidden = true;
   // For inspection from the browser's console and for automated checks.
-  window.atlas = { state, stage, base, surface, flow, lines, events, library, catalogue: () => catalogue, labels, imagery, detail, lab, runLab,
+  window.atlas = { state, stage, base, surface, flow, lines, events, library, catalogue: () => catalogue, labels, imagery, detail, lab, runLab, ocean,
     select: { surface: (id) => selectSurface(id), compare: (id) => selectCompare(id), flow: (id) => selectFlow(id), lines: (id) => selectLines(id) } };
   requestAnimationFrame(loop);
 
@@ -389,6 +391,7 @@ function setTime(t) {
   lines.update(t);
   events.update(t);
   tracks.update(t);
+  ocean.figure.setNow(t);
   const sub = subsolarPoint(t);
   stage.material.uniforms.uSun.value.fromArray(toVector(sub.lon, sub.lat));
   timeline && timeline.set({ time: t, now: Date.now() });
@@ -441,6 +444,8 @@ function bind() {
   });
   $('place').addEventListener('click', (e) => {
     if (e.target.closest('[data-action="unpin"]')) { state.pinned = null; dirty.place = dirty.labels = true; remember(); }
+    if (e.target.closest('[data-action="ocean-column"]') && state.pinned) ocean.ask(state.pinned[0], state.pinned[1]);
+    if (e.target.closest('[data-action="ocean-show"]') && state.pinned) ocean.show(state.pinned[0], state.pinned[1], state.time, seaFloorAt(state.pinned[0], state.pinned[1]));
   });
   stage.on('hover', (place, e) => {
     if (!place || !e) { hover = null; $('tooltip').hidden = true; return; }
@@ -685,6 +690,8 @@ function placeCard() {
   }
   const climate = climateAt(lon, lat);
   for (const [term, html, kind] of climate.rows) add('climate', term, html, kind);
+  // The ocean beneath: currents and temperature by depth, asked for on demand.
+  for (const [term, html, kind] of ocean.rows(lon, lat, t, seaFloorAt(lon, lat))) add('oceanography', term, html, kind);
   const palette = [...models].sort((a, b) => modelRank(a) - modelRank(b));
   for (const s2 of series) for (const l of s2.lines) l.colour = MODEL_COLOURS[palette.indexOf(l.model) % MODEL_COLOURS.length];
   const order = ['meteorology', 'oceanography', 'climate', 'geography', 'geophysics'].map((d) => DOMAINS[d]);
@@ -714,6 +721,13 @@ function placeCard() {
     series,
     models: palette.length > 1 ? palette.map((m, i) => ({ model: m, colour: MODEL_COLOURS[i % MODEL_COLOURS.length] })) : null,
   };
+}
+
+// The depth of the sea floor beneath a place (m, positive down), from the relief.
+function seaFloorAt(lon, lat) {
+  if (!elevation) return NaN;
+  const z = elevation.sample(elevation.meta.variables[0].name, 0, lon, lat);
+  return Number.isFinite(z) && z < 0 ? -z : NaN;
 }
 
 // The climate of a place: its class in the present and in the period shown,
@@ -881,6 +895,7 @@ function renderAbout() {
   }
   if (lab.input) rows.push(`<dt>Laboratory models</dt><dd>Two models of the flow at 500 hPa, solved by the spectral transform method at triangular truncation T42 (a Gaussian grid of 128 × 64) with fourth-order Runge–Kutta steps. The barotropic vorticity equation, as in the first numerical forecast (Charney, Fjørtoft and von Neumann 1950), starts from the wind of the GFS, in steps of 30 min; heights follow by linear balance and are added, as changes, to the analysed height. The shallow-water equations start from its wind and height, in steps of 15 min, after a digital filter over six hours removes the gravity waves of an unbalanced start (Lynch and Huang 1992); their finite radius of deformation slows the longest waves, which the barotropic model moves westward too fast. Tested against the Rossby–Haurwitz wave, Williamson et al.'s steady flow across the poles, and gravity waves of known period.</dd>`);
   if (catalogue.normals.length) rows.push(`<dt>Climate</dt><dd>Climate classes follow Köppen (1936) as revised by Peel et al. (2007) and Beck et al. (2018): the arid group first, then the tropical, polar, temperate and cold groups, with summer the warmer half-year. Besides the published maps, the atlas classifies the ${esc(catalogue.normals[0].model)} normals itself, with the mean temperature of a month taken as the mean of its daily maximum and minimum; the two agree in about nine land cells in ten. Climate diagrams follow Walter and Lieth (1960): 10 °C to 20 mm, dry where precipitation falls below twice the temperature (Gaussen).</dd>`);
+  rows.push(`<dt>The ocean beneath a place</dt><dd>Asked for on demand, through this atlas's server and the laboratory's data library, from the US Navy's global ocean model (ESPC-D-V02, its ocean HYCOM on a 1/12° grid with 40 levels to 5000 m) on HYCOM.org's OPeNDAP server: the column at the model's grid point nearest the place, every 6 hours from two days back to four ahead. Approved for public release, distribution unlimited; HYCOM was developed with funding from the National Ocean Partnership Program and the Office of Naval Research, and its data-assimilative products are funded by the U.S. Navy. <i>Barton, N., et al. (2021), The Navy's Earth System Prediction Capability, Earth and Space Science 8, e2020EA001199.</i> The mixed layer is where temperature first differs from that at 10 m by 0.2 °C (de Boyer Montégut et al. 2004).</dd>`);
   rows.push(`<dt>Method</dt><dd>Fields are interpolated bilinearly in space and linearly in time between the stored steps; a place near missing values takes the mean of the valid neighbours carrying at least half the weight. Wind direction is the direction it comes from. Wave energy travels at the deep-water group speed g T / 4π along the peak direction. The Sun's position follows the Astronomical Almanac's low-precision formulas (0.01°); day, civil, nautical and astronomical twilight are drawn as bands. Countries are joined to indicators by their World Bank and ISO codes; boundaries are Natural Earth's de facto depiction. The Equal Earth projection keeps areas true.</dd>`);
   $('about-body').innerHTML = `<dl>${rows.join('')}</dl>`;
 }
